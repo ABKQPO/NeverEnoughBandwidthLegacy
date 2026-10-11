@@ -1,0 +1,10 @@
+neb.config.general.enabled=Enable NotEnoughBandwidth
+neb.config.general.codec=Compression backend
+neb.config.general.aggregationWindowMillis=Aggregation window (ms)
+neb.config.general.flushThresholdBytes=Flush threshold (bytes)
+neb.config.general.compressionThresholdBytes=Compression threshold (bytes)
+neb.config.general.maxExpandedFrameBytes=Maximum expanded frame (bytes)
+neb.config.general.zstdLevel=zstd level
+neb.config.general.zstdWindowLog=zstd window log
+neb.config.general.collectPacketProfile=Track bytes per packet kind
+neb.config.general.debugLog=Log every frame

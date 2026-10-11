@@ -1,0 +1,10 @@
+neb.config.general.enabled=启用 NotEnoughBandwidth
+neb.config.general.codec=压缩后端
+neb.config.general.aggregationWindowMillis=聚合窗口（毫秒）
+neb.config.general.flushThresholdBytes=强制发送阈值（字节）
+neb.config.general.compressionThresholdBytes=压缩阈值（字节）
+neb.config.general.maxExpandedFrameBytes=解压后最大帧长（字节）
+neb.config.general.zstdLevel=zstd 压缩等级
+neb.config.general.zstdWindowLog=zstd 窗口对数
+neb.config.general.collectPacketProfile=按包类型统计流量
+neb.config.general.debugLog=记录每一帧的压缩率

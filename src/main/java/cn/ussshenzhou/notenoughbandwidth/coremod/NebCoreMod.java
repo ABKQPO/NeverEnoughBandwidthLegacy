@@ -1,0 +1,64 @@
+package cn.ussshenzhou.notenoughbandwidth.coremod;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import com.gtnewhorizon.gtnhlib.config.ConfigException;
+import com.gtnewhorizon.gtnhmixins.IEarlyMixinLoader;
+import com.gtnewhorizon.gtnhmixins.builders.IMixins;
+
+import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
+import cn.ussshenzhou.notenoughbandwidth.mixin.Mixins;
+import cpw.mods.fml.relauncher.IFMLLoadingPlugin;
+
+/**
+ * Core mod half of the mod. Exists only so the pipeline mixin lands before Minecraft's networking
+ * classes are loaded, and so the config is readable by the time the first connection arrives.
+ *
+ * @author USS_Shenzhou
+ */
+@IFMLLoadingPlugin.MCVersion("1.7.10")
+public class NebCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
+
+    static {
+        try {
+            NebConfig.register();
+        } catch (ConfigException e) {
+            throw new RuntimeException("NEB: failed to load the configuration", e);
+        }
+    }
+
+    @Override
+    public String[] getASMTransformerClass() {
+        return null;
+    }
+
+    @Override
+    public String getModContainerClass() {
+        return null;
+    }
+
+    @Override
+    public String getSetupClass() {
+        return null;
+    }
+
+    @Override
+    public void injectData(Map<String, Object> data) {}
+
+    @Override
+    public String getAccessTransformerClass() {
+        return null;
+    }
+
+    @Override
+    public String getMixinConfig() {
+        return "mixins.neb.early.json";
+    }
+
+    @Override
+    public List<String> getMixins(Set<String> loadedCoreMods) {
+        return IMixins.getEarlyMixins(Mixins.class, loadedCoreMods);
+    }
+}
