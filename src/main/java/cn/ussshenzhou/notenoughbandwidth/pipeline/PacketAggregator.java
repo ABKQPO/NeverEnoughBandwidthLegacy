@@ -92,6 +92,18 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
         }
         try {
             profile(ctx, body);
+            int bodySize = body.readableBytes();
+            int entrySize = bodySize + NebVarInt.sizeOf(bodySize);
+            int limit = Math.min(NebFrame.MAX_AGGREGATED_BYTES, NebConfig.maxExpandedFrameBytes);
+            if (accumulator != null && entrySize > limit - accumulator.readableBytes()) {
+                emit(ctx);
+            }
+            if (entrySize > limit) {
+                // Preserve ordering while letting vanilla carry a large individual packet.
+                record(entrySize, entrySize, 1);
+                ctx.write(body.retain(), promise);
+                return;
+            }
             ByteBuf target = accumulator(ctx);
             NebVarInt.write(target, body.readableBytes());
             target.writeBytes(body);
@@ -275,6 +287,9 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
         PacketCodec codec = session.outboundCodec();
         int bound = codec.compressBound(rawSize);
         int headerSize = 1 + NebVarInt.sizeOf(rawSize);
+        if (bound < 0 || bound > NebFrame.MAX_WIRE_BYTES - headerSize) {
+            throw new IllegalStateException("NEB: codec bound exceeds Minecraft's frame length limit");
+        }
         ByteBuf frame = ctx.alloc()
             .directBuffer(headerSize + bound);
         try {

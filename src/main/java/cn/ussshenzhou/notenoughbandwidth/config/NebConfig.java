@@ -27,7 +27,7 @@ public class NebConfig {
         "zstd_stream   - zstd with a context kept alive across frames, best ratio",
         "zstd_block    - zstd, one independent block per frame, works with older zstd-jni builds",
         "deflate_stream- JDK deflate with a 32 KiB sliding window, no native code",
-        "stored        - aggregate only, never compress (useful to measure the aggregation win)" })
+        "stored        - pass through ordinary Minecraft frames without compression" })
     @Config.DefaultString("auto")
     public static String codec = "auto";
 
@@ -38,7 +38,9 @@ public class NebConfig {
     @Config.RangeInt(min = 0, max = 200)
     public static int aggregationWindowMillis = 20;
 
-    @Config.Comment({ "Flush early once this many raw bytes are buffered. Bounds both latency and memory." })
+    @Config.Comment({ "Flush early once this many raw bytes are buffered. Bounds both latency and memory.",
+        "Aggregation is also capped at 1 MiB to fit Minecraft 1.7.10's frame length limit.",
+        "Individual packets above that cap are sent as ordinary Minecraft frames." })
     @Config.DefaultInt(262144)
     @Config.RangeInt(min = 4096, max = 8388608)
     public static int flushThresholdBytes = 262144;

@@ -3,7 +3,9 @@ package cn.ussshenzhou.notenoughbandwidth.pipeline;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -18,11 +20,13 @@ import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecRegistry;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
 import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 import cn.ussshenzhou.notenoughbandwidth.session.NebSession;
+import cn.ussshenzhou.notenoughbandwidth.util.NebVarInt;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.DecoderException;
 
 /**
  * Drives the real handlers, with the real compression backends, over a pair of embedded channels.
@@ -144,6 +148,69 @@ public class PipelineRoundTripTest {
             PacketCodecRegistry.preferred(),
             PacketCodecRegistry.negotiate(PacketCodecRegistry.capabilityMask()),
             "negotiating against our own capabilities must pick what we prefer");
+    }
+
+    @Test
+    @DisplayName("large aggregates fit the vanilla splitter and preserve packet order")
+    void boundsAggregates() {
+        NebConfig.flushThresholdBytes = 8388608;
+        for (PacketCodecType type : PacketCodecRegistry.available()) {
+            EmbeddedChannel sender = sender(type);
+            EmbeddedChannel receiver = new EmbeddedChannel(new PacketExpander(new NebSession(bare())));
+            List<byte[]> sent = new ArrayList<>();
+            Random random = new Random(17);
+            for (int size : new int[] { 700000, 700000, 1100000, 700000 }) {
+                byte[] body = new byte[size];
+                random.nextBytes(body);
+                body[0] = 0x20;
+                sent.add(body);
+                sender.write(Unpooled.wrappedBuffer(body));
+            }
+            sender.flush();
+            sender.runPendingTasks();
+            int index = 0;
+            ByteBuf frame;
+            while ((frame = (ByteBuf) sender.readOutbound()) != null) {
+                assertTrue(frame.readableBytes() <= NebFrame.MAX_WIRE_BYTES, type + " exceeded the wire limit");
+                receiver.writeInbound(frame);
+                ByteBuf body;
+                while ((body = (ByteBuf) receiver.readInbound()) != null) {
+                    assertArrayEquals(sent.get(index++), drain(body));
+                }
+            }
+            assertEquals(sent.size(), index);
+            release(sender);
+            release(receiver);
+        }
+    }
+
+    @Test
+    @DisplayName("a malformed aggregate cannot deliver even its valid prefix")
+    void rejectsMalformedAggregateAtomically() {
+        EmbeddedChannel receiver = new EmbeddedChannel(new PacketExpander(new NebSession(bare())));
+        ByteBuf frame = Unpooled.buffer();
+        frame.writeByte(NebFrame.header(PacketCodecType.STORED));
+        NebVarInt.write(frame, 1);
+        frame.writeByte(0x20);
+        NebVarInt.write(frame, 5);
+        frame.writeByte(0x21);
+        assertThrows(DecoderException.class, () -> receiver.writeInbound(frame));
+        assertNull(receiver.readInbound());
+        assertEquals(0, frame.refCnt());
+        release(receiver);
+    }
+
+    @Test
+    @DisplayName("reserved header bits and oversized stored frames are rejected")
+    void rejectsInvalidHeadersAndStoredSizes() {
+        assertNull(NebFrame.codecOf(NebFrame.MARKER | 0x10));
+        NebConfig.maxExpandedFrameBytes = 2;
+        EmbeddedChannel receiver = new EmbeddedChannel(new PacketExpander(new NebSession(bare())));
+        ByteBuf frame = Unpooled.wrappedBuffer(new byte[] { (byte) NebFrame.MARKER, 2, 0x20, 0x21 });
+        assertThrows(DecoderException.class, () -> receiver.writeInbound(frame));
+        assertNull(receiver.readInbound());
+        assertEquals(0, frame.refCnt());
+        release(receiver);
     }
 
     /**
