@@ -20,7 +20,11 @@ public class NebConnectionListener {
 
     @SubscribeEvent
     public void onClientConnected(FMLNetworkEvent.ServerConnectionFromClientEvent event) {
-        if (event.isLocal || NebSessionRegistry.of(event.manager) == null) {
+        if (event.isLocal) {
+            return;
+        }
+        if (NebSessionRegistry.of(event.manager) == null) {
+            NebLog.warn("No NEB session for {}; that connection stays uncompressed.", event.manager.getSocketAddress());
             return;
         }
         NebNetwork.greet(event.manager);

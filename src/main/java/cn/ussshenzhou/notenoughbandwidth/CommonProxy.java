@@ -1,5 +1,6 @@
 package cn.ussshenzhou.notenoughbandwidth;
 
+import net.minecraft.network.INetHandler;
 import net.minecraft.network.NetworkManager;
 
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
@@ -15,10 +16,16 @@ public class CommonProxy {
     public void preInit(FMLPreInitializationEvent event) {}
 
     /**
-     * @return the client's connection to its server, or {@code null} when there is none, which is
-     *         always the case on a dedicated server
+     * Resolves the connection a received message arrived on.
+     * <p>
+     * This goes through the proxy rather than straight to the handler because the client packet
+     * handler type does not exist on a dedicated server, and because asking Minecraft for "the"
+     * connection does not work: the client's accessor is backed by the player entity, which is
+     * still null while the capability handshake is running.
+     *
+     * @return the connection, or {@code null} when this side cannot own one
      */
-    public NetworkManager clientConnection() {
+    public NetworkManager connectionOf(INetHandler handler) {
         return null;
     }
 }

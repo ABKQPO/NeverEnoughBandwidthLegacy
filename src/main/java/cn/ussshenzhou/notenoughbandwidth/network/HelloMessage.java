@@ -67,17 +67,22 @@ public class HelloMessage implements IMessage {
     }
 
     /**
-     * Shared by both sides. The server speaks first, so only a client has to answer, which is what
-     * the returned message does.
+     * Shared by both sides. The server speaks first, so only a client has to answer.
      */
-    public static class Handler implements IMessageHandler<HelloMessage, HelloMessage> {
+    public static class Handler implements IMessageHandler<HelloMessage, IMessage> {
 
         @Override
-        public HelloMessage onMessage(HelloMessage message, MessageContext ctx) {
+        public IMessage onMessage(HelloMessage message, MessageContext ctx) {
             boolean serverSide = ctx.side == Side.SERVER;
+            NebLog.debug(
+                "Received a NEB hello from {} (protocol {}, backends 0x{}).",
+                message.label(),
+                message.protocolVersion(),
+                Integer.toHexString(message.capabilityMask()));
             NetworkManager manager = NebNetwork.managerOf(ctx);
             NebSession session = NebSessionRegistry.of(manager);
             if (session == null) {
+                NebLog.warn("A NEB hello arrived on a connection with no session; staying uncompressed.");
                 return null;
             }
             if (message.protocolVersion() != ModConstants.PROTOCOL_VERSION) {
@@ -88,10 +93,13 @@ public class HelloMessage implements IMessage {
                     ModConstants.PROTOCOL_VERSION);
                 return null;
             }
+            if (!serverSide) {
+                NebNetwork.sendHello(manager, "client");
+            }
             session.peerLabel(serverSide ? NebNetwork.playerNameOf(ctx) : "server");
             PacketCodecType agreed = PacketCodecRegistry.negotiate(message.capabilityMask());
             session.enableOutbound(agreed, message.protocolVersion());
-            return serverSide ? null : new HelloMessage("client");
+            return null;
         }
     }
 }

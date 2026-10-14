@@ -46,11 +46,14 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
 
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf frame, List<Object> out) {
+        int wireSize = frame.readableBytes() + NebVarInt.sizeOf(frame.readableBytes());
         if (!NebFrame.isNebFrame(frame)) {
+            // Counted too, so the reported ratio covers the whole stream and stays comparable with
+            // the outbound figure.
+            record(wireSize, wireSize, 1);
             out.add(frame.retain());
             return;
         }
-        int wireSize = frame.readableBytes() + NebVarInt.sizeOf(frame.readableBytes());
         int header = frame.readUnsignedByte();
         PacketCodecType codecType = NebFrame.codecOf(header);
         if (codecType == null) {
@@ -59,21 +62,24 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
         ByteBuf raw = codecType == PacketCodecType.STORED ? frame.retain() : expand(ctx, codecType, frame);
         try {
             int rawSize = raw.readableBytes();
-            int packets = split(ctx, raw, out);
-            session.stats()
-                .recordInbound(rawSize, wireSize, packets);
-            NebStats.traffic()
-                .recordInbound(rawSize, wireSize, packets);
-            if (NebConfig.debugLog) {
-                NebLog.debug(
-                    "in  {} packets, {} <- {} ({})",
-                    packets,
-                    ByteSize.format(rawSize),
-                    ByteSize.format(wireSize),
-                    ByteSize.formatRatio(rawSize, wireSize));
-            }
+            record(rawSize, wireSize, split(ctx, raw, out));
         } finally {
             raw.release();
+        }
+    }
+
+    private void record(int rawSize, int wireSize, int packets) {
+        session.stats()
+            .recordInbound(rawSize, wireSize, packets);
+        NebStats.traffic()
+            .recordInbound(rawSize, wireSize, packets);
+        if (NebConfig.debugLog) {
+            NebLog.debug(
+                "in  {} packets, {} <- {} ({})",
+                packets,
+                ByteSize.format(rawSize),
+                ByteSize.format(wireSize),
+                ByteSize.formatRatio(rawSize, wireSize));
         }
     }
 
@@ -93,9 +99,12 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
             .directBuffer(rawSize, rawSize);
         try {
             ByteBuffer from = source.nioBuffer();
-            ByteBuffer to = raw.nioBuffer(0, rawSize);
+            ByteBuffer to = raw.nioBuffer(raw.writerIndex(), rawSize);
+            // See the matching note in PacketAggregator: the position a ByteBuf's nio view starts
+            // at is implementation defined, so measure the codec's output as a difference.
+            int before = to.position();
             codec.decompress(from, to);
-            raw.writerIndex(to.position());
+            raw.writerIndex(raw.writerIndex() + (to.position() - before));
         } catch (Throwable t) {
             raw.release();
             throw t instanceof DecoderException ? (DecoderException) t

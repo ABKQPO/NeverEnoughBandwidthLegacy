@@ -1,7 +1,7 @@
 package cn.ussshenzhou.notenoughbandwidth;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.network.NetHandlerPlayClient;
+import net.minecraft.network.INetHandler;
 import net.minecraft.network.NetworkManager;
 import net.minecraftforge.client.ClientCommandHandler;
 
@@ -22,12 +22,7 @@ public class ClientProxy extends CommonProxy {
     }
 
     @Override
-    public NetworkManager clientConnection() {
-        Minecraft minecraft = Minecraft.getMinecraft();
-        if (minecraft == null) {
-            return null;
-        }
-        NetHandlerPlayClient handler = minecraft.getNetHandler();
-        return handler == null ? null : handler.getNetworkManager();
+    public NetworkManager connectionOf(INetHandler handler) {
+        return handler instanceof NetHandlerPlayClient ? ((NetHandlerPlayClient) handler).getNetworkManager() : null;
     }
 }

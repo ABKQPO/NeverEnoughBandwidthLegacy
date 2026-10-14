@@ -53,7 +53,6 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
 
     private ByteBuf accumulator;
     private int packetCount;
-    private int firstPrefixSize;
     private boolean flushScheduled;
     private Runnable flushTask;
 
@@ -76,6 +75,13 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
     @Override
     public void write(ChannelHandlerContext ctx, Object message, ChannelPromise promise) throws Exception {
         if (!(message instanceof ByteBuf) || !session.outboundEnabled()) {
+            if (message instanceof ByteBuf) {
+                // Still measured, so the reported ratio covers the whole stream rather than only
+                // the part that happened to be compressible.
+                ByteBuf passed = (ByteBuf) message;
+                int size = passed.readableBytes() + NebVarInt.sizeOf(passed.readableBytes());
+                record(size, size, 1);
+            }
             ctx.write(message, promise);
             return;
         }
@@ -87,12 +93,8 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
         try {
             profile(ctx, body);
             ByteBuf target = accumulator(ctx);
-            int prefixSize = NebVarInt.sizeOf(body.readableBytes());
             NebVarInt.write(target, body.readableBytes());
             target.writeBytes(body);
-            if (packetCount == 0) {
-                firstPrefixSize = prefixSize;
-            }
             packetCount++;
             pending.add(promise);
         } finally {
@@ -171,9 +173,15 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
         pending.clear();
         packetCount = 0;
 
+        PacketCodecType type = session.outboundType();
+        if (type == PacketCodecType.STORED || rawSize < NebConfig.compressionThresholdBytes) {
+            emitPlain(ctx, promises, rawSize, packets);
+            return;
+        }
+
         ByteBuf frame;
         try {
-            frame = buildFrame(ctx, rawSize, packets);
+            frame = compressedFrame(ctx, type, rawSize);
         } catch (Throwable t) {
             releaseAccumulator();
             failPending(t);
@@ -187,18 +195,7 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
         accumulator = null;
 
         int wireSize = frame.readableBytes() + NebVarInt.sizeOf(frame.readableBytes());
-        session.stats()
-            .recordOutbound(rawSize, wireSize, packets);
-        NebStats.traffic()
-            .recordOutbound(rawSize, wireSize, packets);
-        if (NebConfig.debugLog) {
-            NebLog.debug(
-                "out {} packets, {} -> {} ({})",
-                packets,
-                ByteSize.format(rawSize),
-                ByteSize.format(wireSize),
-                ByteSize.formatRatio(rawSize, wireSize));
-        }
+        record(rawSize, wireSize, packets);
 
         ChannelFuture future = ctx.write(frame);
         future.addListener(new ChannelFutureListener() {
@@ -220,42 +217,58 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
     }
 
     /**
-     * Turns the accumulator into the buffer that goes on the wire, consuming it.
+     * Sends the buffered packets as ordinary Minecraft frames, one each.
+     * <p>
+     * This is the path taken whenever compression would not pay for itself - a frame below the
+     * threshold, or a connection that settled on the pass-through backend. Emitting the bodies
+     * separately reproduces the vanilla stream byte for byte, which matters: wrapping three
+     * fifteen-byte movement packets in a NEB frame costs a header and buys nothing, and an idle
+     * client sends almost nothing else. Every original write promise is handed to the frame that
+     * actually carries its packet, so completion semantics stay exactly as vanilla had them.
      */
-    private ByteBuf buildFrame(ChannelHandlerContext ctx, int rawSize, int packets) {
-        PacketCodecType type = session.outboundType();
-        boolean compress = type != PacketCodecType.STORED && rawSize >= NebConfig.compressionThresholdBytes;
-        if (!compress) {
-            if (packets == 1) {
-                return plainFrame();
-            }
-            return storedFrame(ctx, rawSize);
-        }
-        return compressedFrame(ctx, type, rawSize);
-    }
-
-    /**
-     * A lone small packet is cheapest as an ordinary Minecraft frame: no header, no length prefix,
-     * nothing for the peer to undo.
-     */
-    private ByteBuf plainFrame() {
+    private void emitPlain(ChannelHandlerContext ctx, List<ChannelPromise> promises, int rawSize, int packets) {
         ByteBuf raw = accumulator;
-        raw.skipBytes(firstPrefixSize);
-        return raw;
+        accumulator = null;
+        try {
+            int index = 0;
+            while (raw.isReadable()) {
+                int bodySize = NebVarInt.read(raw);
+                ByteBuf body = raw.readBytes(bodySize);
+                if (index < promises.size()) {
+                    ctx.write(body, promises.get(index));
+                } else {
+                    ctx.write(body);
+                }
+                index++;
+            }
+        } catch (Throwable t) {
+            failPending(t);
+            for (ChannelPromise promise : promises) {
+                promise.tryFailure(t);
+            }
+            NebLog.error("Failed to write buffered packets for {}, closing the connection.", session.peerLabel(), t);
+            ctx.close();
+            return;
+        } finally {
+            raw.release();
+        }
+        record(rawSize, rawSize, packets);
+        ctx.flush();
     }
 
-    private ByteBuf storedFrame(ChannelHandlerContext ctx, int rawSize) {
-        ByteBuf frame = ctx.alloc()
-            .directBuffer(1 + rawSize);
-        try {
-            frame.writeByte(NebFrame.header(PacketCodecType.STORED));
-            frame.writeBytes(accumulator);
-        } catch (Throwable t) {
-            frame.release();
-            throw t;
+    private void record(int rawSize, int wireSize, int packets) {
+        session.stats()
+            .recordOutbound(rawSize, wireSize, packets);
+        NebStats.traffic()
+            .recordOutbound(rawSize, wireSize, packets);
+        if (NebConfig.debugLog) {
+            NebLog.debug(
+                "out {} packets, {} -> {} ({})",
+                packets,
+                ByteSize.format(rawSize),
+                ByteSize.format(wireSize),
+                ByteSize.formatRatio(rawSize, wireSize));
         }
-        accumulator.release();
-        return frame;
     }
 
     private ByteBuf compressedFrame(ChannelHandlerContext ctx, PacketCodecType type, int rawSize) {
@@ -269,8 +282,12 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
             NebVarInt.write(frame, rawSize);
             ByteBuffer source = accumulator.nioBuffer();
             ByteBuffer destination = frame.nioBuffer(frame.writerIndex(), bound);
+            // Some ByteBuf implementations hand back their internal buffer positioned at the
+            // requested index rather than a zero-based slice, so the only portable way to learn
+            // how much the codec wrote is to diff the position.
+            int before = destination.position();
             codec.compress(source, destination);
-            frame.writerIndex(frame.writerIndex() + destination.position());
+            frame.writerIndex(frame.writerIndex() + (destination.position() - before));
         } catch (Throwable t) {
             frame.release();
             throw t;
