@@ -7,19 +7,6 @@ repositories {
             includeGroup "com.falsepattern"
         }
     }
-    ivy {
-        name = "archaicfix-github"
-        url = uri("https://github.com/embeddedt/ArchaicFix/releases/download/")
-        patternLayout {
-            artifact "[revision]/[module]-[revision](-[classifier]).[ext]"
-        }
-        metadataSources {
-            artifact()
-        }
-        content {
-            includeModule "org.embeddedt", "archaicfix"
-        }
-    }
     mavenLocal()
     maven {
         url = uri("https://jitpack.io")
