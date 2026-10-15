@@ -97,7 +97,8 @@ public class HelloMessage implements IMessage {
                 NebNetwork.sendHello(manager, "client");
             }
             session.peerLabel(serverSide ? NebNetwork.playerNameOf(ctx) : "server");
-            PacketCodecType agreed = PacketCodecRegistry.negotiate(message.capabilityMask());
+            boolean allowStateful = !serverSide || !NebNetwork.deniesContext(ctx);
+            PacketCodecType agreed = PacketCodecRegistry.negotiate(message.capabilityMask(), allowStateful);
             session.enableOutbound(agreed, message.protocolVersion());
             return null;
         }

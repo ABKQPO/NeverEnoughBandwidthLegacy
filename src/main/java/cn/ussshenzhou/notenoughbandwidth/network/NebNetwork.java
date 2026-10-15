@@ -7,6 +7,7 @@ import net.minecraft.server.MinecraftServer;
 import cn.ussshenzhou.notenoughbandwidth.ModConstants;
 import cn.ussshenzhou.notenoughbandwidth.NebLog;
 import cn.ussshenzhou.notenoughbandwidth.NotEnoughBandwidth;
+import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.network.simpleimpl.MessageContext;
 import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
@@ -92,6 +93,22 @@ public class NebNetwork {
     public static String playerNameOf(MessageContext ctx) {
         EntityPlayerMP player = ctx.getServerHandler().playerEntity;
         return player == null ? "unknown" : player.getCommandSenderName();
+    }
+
+    /**
+     * @return whether the configuration opts this player out of a history-keeping backend
+     */
+    public static boolean deniesContext(MessageContext ctx) {
+        EntityPlayerMP player = ctx.getServerHandler().playerEntity;
+        if (player == null) {
+            return false;
+        }
+        String uuid = player.getGameProfile() == null || player.getGameProfile()
+            .getId() == null ? ""
+                : player.getGameProfile()
+                    .getId()
+                    .toString();
+        return NebConfig.deniesContext(player.getCommandSenderName(), uuid);
     }
 
     public static boolean isOperator(EntityPlayerMP player) {

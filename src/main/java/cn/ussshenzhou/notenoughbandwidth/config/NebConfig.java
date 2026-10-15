@@ -67,6 +67,12 @@ public class NebConfig {
     @Config.RangeInt(min = 17, max = 27)
     public static int zstdWindowLog = 22;
 
+    @Config.Comment({ "Players listed here get a backend that keeps no per-connection history, trading ratio",
+        "for memory. Use it for a player on a server too tight on native memory to afford a window.",
+        "Accepts player names or UUIDs; matching is case insensitive." })
+    @Config.DefaultStringList({})
+    public static String[] playersWithoutContext = {};
+
     @Config.Comment({ "Track bytes and compression ratio per packet id and per mod channel.",
         "Needed by '/neb report'; costs one map lookup per packet." })
     @Config.DefaultBoolean(true)
@@ -75,6 +81,21 @@ public class NebConfig {
     @Config.Comment({ "Log every frame's compression ratio at debug level. Very noisy, for troubleshooting only." })
     @Config.DefaultBoolean(false)
     public static boolean debugLog = false;
+
+    /**
+     * @return whether this player asked, by configuration, not to be given a history-keeping backend
+     */
+    public static boolean deniesContext(String name, String uuid) {
+        for (String entry : playersWithoutContext) {
+            if (entry == null || entry.isEmpty()) {
+                continue;
+            }
+            if (entry.equalsIgnoreCase(name) || entry.equalsIgnoreCase(uuid)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public static void register() throws ConfigException {
         ConfigurationManager.registerConfig(NebConfig.class);

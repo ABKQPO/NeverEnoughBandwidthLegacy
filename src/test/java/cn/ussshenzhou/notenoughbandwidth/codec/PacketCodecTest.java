@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -71,6 +72,64 @@ public class PacketCodecTest {
         } finally {
             codec.close();
         }
+    }
+
+    @Test
+    @DisplayName("remembering previous frames beats a stronger algorithm with no memory")
+    void historyBeatsAStrongerAlgorithm() {
+        if (!PacketCodecRegistry.isAvailable(PacketCodecType.ZSTD_BLOCK)
+            || !PacketCodecRegistry.isAvailable(PacketCodecType.DEFLATE_STREAM)) {
+            return;
+        }
+        List<byte[]> frames = modChannelFrames();
+        long withHistory = totalCompressed(PacketCodecType.DEFLATE_STREAM, frames);
+        long without = totalCompressed(PacketCodecType.ZSTD_BLOCK, frames);
+        assertTrue(
+            withHistory < without,
+            "this is why the preference list ranks deflate_stream above zstd_block: " + withHistory
+                + " vs "
+                + without
+                + " bytes");
+    }
+
+    @Test
+    @DisplayName("the chosen backend is the best one that remembers previous frames")
+    void prefersAHistoryKeepingBackend() {
+        PacketCodecType preferred = PacketCodecRegistry.preferred();
+        boolean anyStateful = false;
+        for (PacketCodecType type : PacketCodecRegistry.available()) {
+            anyStateful |= type.stateful();
+        }
+        if (anyStateful) {
+            assertTrue(
+                preferred.stateful(),
+                "a stateless backend was chosen while a history-keeping one was available: " + preferred);
+        }
+    }
+
+    /**
+     * Frames shaped like a burst of mod custom payloads: a packet id, a channel name, a short body.
+     * The channel name repeating across frames is the whole point - it is what a backend with no
+     * memory has to pay for again every single time.
+     */
+    private static List<byte[]> modChannelFrames() {
+        String[] channels = { "GregTech", "appliedenergistics2", "gtnhlib", "FML|HS", "betterquesting", "Thaumcraft" };
+        Random random = new Random(5L);
+        List<byte[]> frames = new ArrayList<>();
+        for (int i = 0; i < 24; i++) {
+            StringBuilder builder = new StringBuilder();
+            for (int packet = 0; packet < 6; packet++) {
+                builder.append('?')
+                    .append(channels[(i + packet) % channels.length])
+                    .append(" ")
+                    .append("idCountDamagetagdisplay")
+                    .append((char) ('a' + random.nextInt(26)));
+            }
+            frames.add(
+                builder.toString()
+                    .getBytes(StandardCharsets.UTF_8));
+        }
+        return frames;
     }
 
     private static byte[] compress(PacketCodec codec, byte[] raw) {

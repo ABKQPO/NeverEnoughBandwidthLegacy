@@ -25,9 +25,16 @@ public class PacketCodecRegistry {
 
     /**
      * Best first. A type missing from this list can still be decoded, it is just never chosen.
+     * <p>
+     * Note the order of the two fallbacks: the JDK deflate backend ranks above the one-frame-at-a-time
+     * zstd backend even though zstd is the better algorithm. What dominates this traffic is not how
+     * well a single frame compresses but whether the backend remembers the frames before it, because
+     * Minecraft repeats the same channel names, entity ids and NBT keys endlessly. A 32 KiB sliding
+     * window beats a stronger algorithm with no memory at all, and it needs no native library, so it
+     * is also the more portable of the two. {@code PacketCodecTest} holds this ordering to account.
      */
-    private static final PacketCodecType[] PREFERENCE = { PacketCodecType.ZSTD_STREAM, PacketCodecType.ZSTD_BLOCK,
-        PacketCodecType.DEFLATE_STREAM, PacketCodecType.STORED };
+    private static final PacketCodecType[] PREFERENCE = { PacketCodecType.ZSTD_STREAM, PacketCodecType.DEFLATE_STREAM,
+        PacketCodecType.ZSTD_BLOCK, PacketCodecType.STORED };
 
     private static final Map<PacketCodecType, PacketCodecFactory> FACTORIES = new EnumMap<>(PacketCodecType.class);
 
@@ -123,7 +130,18 @@ public class PacketCodecRegistry {
      * Intersects our abilities with a peer's capability mask and returns the best shared backend.
      */
     public static PacketCodecType negotiate(int peerMask) {
+        return negotiate(peerMask, true);
+    }
+
+    /**
+     * @param allowStateful false to exclude the backends that keep a per-connection history, which
+     *                      is how a player is opted out of the memory that history costs
+     */
+    public static PacketCodecType negotiate(int peerMask, boolean allowStateful) {
         for (PacketCodecType type : PREFERENCE) {
+            if (!allowStateful && type.stateful()) {
+                continue;
+            }
             if (isAvailable(type) && (peerMask & 1 << type.wireId()) != 0) {
                 return type;
             }
