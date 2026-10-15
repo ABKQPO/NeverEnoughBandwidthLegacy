@@ -97,7 +97,12 @@ public class HelloMessage implements IMessage {
             }
             session.configurePeer(serverSide, message.capabilityMask());
             if (!serverSide && session.markClientHelloSent()) {
-                NebNetwork.sendHello(manager, "client");
+                PacketCodecType proposal = message.selectedCodec();
+                if (proposal == null || !PacketCodecRegistry.isAvailable(proposal)
+                    || (message.capabilityMask() & 1 << proposal.wireId()) == 0) {
+                    proposal = PacketCodecType.STORED;
+                }
+                NebNetwork.sendHello(manager, "client", proposal);
             }
             session.peerLabel(serverSide ? NebNetwork.playerNameOf(ctx) : "server");
             if (!serverSide && message.selectedCodec() == null) {
@@ -106,7 +111,14 @@ public class HelloMessage implements IMessage {
             boolean allowStateful = !serverSide || !NebNetwork.deniesContext(ctx);
             PacketCodecType agreed;
             if (serverSide) {
-                agreed = PacketCodecRegistry.negotiate(message.capabilityMask(), allowStateful);
+                PacketCodecType proposal = message.selectedCodec();
+                if (proposal != null && (allowStateful || !proposal.stateful())
+                    && PacketCodecRegistry.isAvailable(proposal)
+                    && (message.capabilityMask() & 1 << proposal.wireId()) != 0) {
+                    agreed = proposal;
+                } else {
+                    agreed = PacketCodecRegistry.negotiate(message.capabilityMask(), allowStateful);
+                }
             } else {
                 // The server decides for both directions. A client that cannot honour the choice
                 // falls back to sending nothing compressed rather than picking for itself, because
