@@ -12,7 +12,11 @@ public enum Mixins implements IMixins {
     NETWORK_PIPELINE(new MixinBuilder("Install the aggregating and compressing pipeline handlers")
         .addCommonMixins("MixinNetworkManager")
         .setPhase(Phase.EARLY)
-        .setApplyIf(() -> NebConfig.enabled));
+        .setApplyIf(() -> NebConfig.enabled)),
+    DELAYED_CHUNK_CACHE(new MixinBuilder("Retain recently watched chunks without replacing vanilla chunk management")
+        .addCommonMixins("MixinPlayerManager", "MixinPlayerInstance")
+        .setPhase(Phase.EARLY)
+        .setApplyIf(() -> NebConfig.enabled && NebConfig.delayedChunkCache));
 
     private final MixinBuilder builder;
 

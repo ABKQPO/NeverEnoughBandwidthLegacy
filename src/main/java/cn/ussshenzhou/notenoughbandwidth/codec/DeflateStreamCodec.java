@@ -71,14 +71,21 @@ public class DeflateStreamCodec implements PacketCodec {
                 }
                 produced += written;
             }
+            if (produced != expected) {
+                throw new IllegalStateException(
+                    "NEB: deflate frame expanded to " + produced + " bytes, expected " + expected);
+            }
+            dst.put(out, 0, produced);
+            // Drain flush metadata and detect output still buffered after the declared size.
+            if (inflater.inflate(out, 0, 1) != 0) {
+                throw new IllegalStateException("NEB: deflate frame exceeds its declared size");
+            }
+            if (inflater.getRemaining() != 0 || (!inflater.needsInput() && !inflater.finished())) {
+                throw new IllegalStateException("NEB: deflate frame has trailing input or requires a dictionary");
+            }
         } catch (DataFormatException e) {
             throw new IllegalStateException("NEB: corrupt deflate frame", e);
         }
-        if (produced != expected) {
-            throw new IllegalStateException(
-                "NEB: deflate frame expanded to " + produced + " bytes, expected " + expected);
-        }
-        dst.put(out, 0, produced);
     }
 
     private byte[] take(int size, boolean input) {

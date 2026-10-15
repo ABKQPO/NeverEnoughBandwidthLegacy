@@ -1,5 +1,6 @@
 package cn.ussshenzhou.notenoughbandwidth.stat;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -15,8 +16,8 @@ public class RemoteStats {
         List<PacketKindSample> newInbound) {
         snapshot = newSnapshot;
         codec = newCodec;
-        outbound = List.copyOf(newOutbound);
-        inbound = List.copyOf(newInbound);
+        outbound = Collections.unmodifiableList(new ArrayList<>(newOutbound));
+        inbound = Collections.unmodifiableList(new ArrayList<>(newInbound));
         receivedAt = System.currentTimeMillis();
     }
 

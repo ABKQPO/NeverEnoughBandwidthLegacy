@@ -6,6 +6,13 @@ neb.config.general.compressionThresholdBytes=压缩阈值（字节）
 neb.config.general.maxExpandedFrameBytes=解压后最大帧长（字节）
 neb.config.general.zstdLevel=zstd 压缩等级
 neb.config.general.zstdWindowLog=zstd 窗口对数
+neb.config.general.enableBandwidthDictionary=训练 zstd 字典
+
+neb.config.general.delayedChunkCache=延迟卸载已发送区块
+neb.config.general.delayedChunkCacheSize=每位玩家最大缓存区块数
+neb.config.general.delayedChunkCacheDistance=额外区块缓存距离
+neb.config.general.delayedChunkCacheSeconds=区块缓存超时（秒）
+
 neb.config.general.collectPacketProfile=按包类型统计流量
 neb.config.general.debugLog=记录每一帧的压缩率
 key.neb.stat=流量统计（默认 Alt+N）

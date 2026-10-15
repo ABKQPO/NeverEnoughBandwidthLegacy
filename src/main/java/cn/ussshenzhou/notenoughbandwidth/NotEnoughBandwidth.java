@@ -1,6 +1,7 @@
 package cn.ussshenzhou.notenoughbandwidth;
 
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecRegistry;
+import cn.ussshenzhou.notenoughbandwidth.codec.zstd.BandwidthDictionary;
 import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 import cn.ussshenzhou.notenoughbandwidth.network.NebNetwork;
 import cn.ussshenzhou.notenoughbandwidth.report.NebCommand;
@@ -9,6 +10,7 @@ import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.SidedProxy;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
+import cpw.mods.fml.common.event.FMLServerStoppedEvent;
 
 @Mod(
     modid = Tags.MODID,
@@ -45,6 +47,12 @@ public class NotEnoughBandwidth {
 
     @Mod.EventHandler
     public void serverStarting(FMLServerStartingEvent event) {
+        BandwidthDictionary.reset();
         event.registerServerCommand(new NebCommand());
+    }
+
+    @Mod.EventHandler
+    public void serverStopped(FMLServerStoppedEvent event) {
+        BandwidthDictionary.reset();
     }
 }

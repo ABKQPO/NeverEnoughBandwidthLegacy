@@ -6,6 +6,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
+import cn.ussshenzhou.notenoughbandwidth.ModConstants;
 import cn.ussshenzhou.notenoughbandwidth.NebLog;
 import cn.ussshenzhou.notenoughbandwidth.codec.zstd.ZstdBlockCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.zstd.ZstdStreamCodec;
@@ -93,6 +94,9 @@ public class PacketCodecRegistry {
                 mask |= 1 << type.wireId();
             }
         }
+        if (isAvailable(PacketCodecType.ZSTD_STREAM) || isAvailable(PacketCodecType.ZSTD_BLOCK)) {
+            mask |= ModConstants.DICTIONARY_CAPABILITY;
+        }
         return mask;
     }
 
@@ -101,6 +105,10 @@ public class PacketCodecRegistry {
     }
 
     public static PacketCodecType negotiate(int peerMask, boolean allowStateful) {
+        PacketCodecType requested = preferred();
+        if ((allowStateful || !requested.stateful()) && (peerMask & 1 << requested.wireId()) != 0) {
+            return requested;
+        }
         for (PacketCodecType type : PREFERENCE) {
             if (!allowStateful && type.stateful()) {
                 continue;
@@ -129,7 +137,7 @@ public class PacketCodecRegistry {
             if (!isAvailable(type)) {
                 continue;
             }
-            if (!builder.isEmpty()) {
+            if (builder.length() != 0) {
                 builder.append(", ");
             }
             builder.append(type.configName())

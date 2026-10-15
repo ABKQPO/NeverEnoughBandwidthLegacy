@@ -61,6 +61,33 @@ public class NebConfig {
     @Config.RangeInt(min = 17, max = 27)
     public static int zstdWindowLog = 22;
 
+    @Config.Comment({ "Train bounded server dictionaries for peers advertising dictionary support.",
+        "Candidates must improve compression on held-out samples; legacy peers keep their existing format." })
+    @Config.DefaultBoolean(true)
+    public static boolean enableBandwidthDictionary = true;
+
+    @Config.Comment({ "Retain recently sent chunks briefly to avoid retransmission when a player returns.",
+        "Retained chunks still receive block updates, but do not start new entity tracking.",
+        "Existing entity tracking follows vanilla distance rules." })
+    @Config.DefaultBoolean(true)
+    @Config.RequiresMcRestart
+    public static boolean delayedChunkCache = true;
+
+    @Config.Comment("Maximum retained chunks per player, in addition to the normal view distance.")
+    @Config.DefaultInt(128)
+    @Config.RangeInt(min = 0, max = 2048)
+    public static int delayedChunkCacheSize = 128;
+
+    @Config.Comment("Maximum distance beyond the actual view radius for retained chunks.")
+    @Config.DefaultInt(2)
+    @Config.RangeInt(min = 0, max = 16)
+    public static int delayedChunkCacheDistance = 2;
+
+    @Config.Comment("Maximum time in seconds to retain a chunk after it leaves the player's view.")
+    @Config.DefaultInt(10)
+    @Config.RangeInt(min = 1, max = 120)
+    public static int delayedChunkCacheSeconds = 10;
+
     @Config.Comment({ "Players listed here get a backend that keeps no per-connection history, trading ratio",
         "for memory. Use it for a player on a server too tight on native memory to afford a window.",
         "Accepts player names or UUIDs; matching is case insensitive." })

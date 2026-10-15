@@ -7,6 +7,8 @@ import net.minecraft.server.MinecraftServer;
 import cn.ussshenzhou.notenoughbandwidth.ModConstants;
 import cn.ussshenzhou.notenoughbandwidth.NebLog;
 import cn.ussshenzhou.notenoughbandwidth.NotEnoughBandwidth;
+import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecRegistry;
+import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
 import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.network.simpleimpl.MessageContext;
@@ -30,6 +32,10 @@ public class NebNetwork {
     }
 
     public static void sendHello(NetworkManager manager, String label) {
+        sendHello(manager, label, null);
+    }
+
+    public static void sendHello(NetworkManager manager, String label, PacketCodecType selectedCodec) {
         if (channel == null || manager == null || !manager.isChannelOpen()) {
             NebLog.warn(
                 "Cannot send the NEB hello to {}: the connection is not ready.",
@@ -37,7 +43,7 @@ public class NebNetwork {
             return;
         }
         try {
-            manager.scheduleOutboundPacket(channel.getPacketFrom(new HelloMessage(label)));
+            manager.scheduleOutboundPacket(channel.getPacketFrom(new HelloMessage(label, selectedCodec)));
             NebLog.debug("Sent the NEB hello to {}.", manager.getSocketAddress());
         } catch (Throwable t) {
             NebLog.error(
@@ -48,7 +54,7 @@ public class NebNetwork {
     }
 
     public static void greet(NetworkManager manager) {
-        sendHello(manager, "server");
+        sendHello(manager, "server", PacketCodecRegistry.preferred());
     }
 
     public static void queryServer() {

@@ -7,11 +7,12 @@ import com.github.luben.zstd.Zstd;
 import com.github.luben.zstd.ZstdCompressCtx;
 import com.github.luben.zstd.ZstdDecompressCtx;
 
+import cn.ussshenzhou.notenoughbandwidth.codec.DictionaryCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecFactory;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
 
-public class ZstdBlockCodec implements PacketCodec {
+public class ZstdBlockCodec implements DictionaryCodec {
 
     private final ZstdCompressCtx compressCtx;
     private final ZstdDecompressCtx decompressCtx;
@@ -61,6 +62,12 @@ public class ZstdBlockCodec implements PacketCodec {
 
     private static void advance(ByteBuffer buffer, int position) {
         ((Buffer) buffer).position(position);
+    }
+
+    @Override
+    public void loadDictionary(byte[] dictionary) {
+        compressCtx.loadDict(dictionary);
+        decompressCtx.loadDict(dictionary);
     }
 
     @Override

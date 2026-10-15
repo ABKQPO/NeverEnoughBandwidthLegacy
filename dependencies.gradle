@@ -1,3 +1,7 @@
+configurations {
+    devClientMods
+}
+
 dependencies {
 
     api("com.github.GTNewHorizons:GTNHLib:0.11.52:dev")
@@ -5,16 +9,21 @@ dependencies {
 
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.155-GTNH:dev")
 
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Hodgepodge:2.7.215:dev")
+    runtimeOnlyNonPublishable("com.falsepattern:chunkapi-mc1.7.10:0.8.1:dev")
+    runtimeOnlyNonPublishable("org.embeddedt:archaicfix:0.8.0:dev")
+    devClientMods("com.github.GTNewHorizons:Angelica:2.2.13:dev")
+
     // jvmDowngrader
     compileOnly("javax.xml.bind:jaxb-api:2.3.1")
     compileOnly("org.jetbrains:annotations:26.0.1")
 
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 configurations.configureEach {
+    resolutionStrategy {
+        force "com.github.GTNewHorizons:GTNHLib:0.11.52"
+    }
     exclude group: "com.github.GTNewHorizons", module: "CodeChickenLib"
-    exclude group: "com.github.GTNewHorizons", module: "Hodgepodge"
     exclude group: "com.github.GTNewHorizons", module: "Baubles"
 }

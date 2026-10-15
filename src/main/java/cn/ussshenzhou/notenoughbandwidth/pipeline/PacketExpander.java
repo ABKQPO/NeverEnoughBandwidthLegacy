@@ -28,6 +28,8 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
 
     private final NebSession session;
     private final PacketKindResolver resolver = new PacketKindResolver();
+    private final ChannelIndex channelIndex = new ChannelIndex();
+    private final CustomPayloadLookup payloadLookup = new CustomPayloadLookup();
 
     public PacketExpander(NebSession session) {
         this.session = session;
@@ -36,6 +38,11 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf frame, List<Object> out) {
         int wireSize = frame.readableBytes() + NebVarInt.sizeOf(frame.readableBytes());
+        if (DictionaryFrame.matches(frame)) {
+            session.installInboundDictionary(DictionaryFrame.decode(frame));
+            record(0, wireSize, 0);
+            return;
+        }
         if (!NebFrame.isNebFrame(frame)) {
             // Counted too, so the reported ratio covers the whole stream and stays comparable with
             // the outbound figure.
@@ -87,28 +94,27 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
                 "NEB: peer sent a " + codecType.configName() + " frame but this side cannot decode it");
         }
         ByteBuf raw;
-        try (PacketCodec codec = session.inboundCodec(codecType)) {
-            ByteBuf source = codec.requiresDirectBuffers() && !frame.isDirect() ? toDirect(ctx, frame) : frame.retain();
-            raw = ctx.alloc()
-                .directBuffer(rawSize, rawSize);
-            try {
-                ByteBuffer from = source.nioBuffer();
-                ByteBuffer to = raw.nioBuffer(raw.writerIndex(), rawSize);
-                // See the matching note in PacketAggregator: the position a ByteBuf's nio view starts
-                // at is implementation defined, so measure the codec's output as a difference.
-                int before = to.position();
-                codec.decompress(from, to);
-                if (to.position() - before != rawSize) {
-                    throw new CorruptedFrameException("NEB: expanded frame does not match its declared size");
-                }
-                raw.writerIndex(raw.writerIndex() + (to.position() - before));
-            } catch (Throwable t) {
-                raw.release();
-                throw t instanceof DecoderException ? (DecoderException) t
-                    : new DecoderException("NEB: failed to expand a " + codecType.configName() + " frame", t);
-            } finally {
-                source.release();
+        PacketCodec codec = session.inboundCodec(codecType);
+        ByteBuf source = codec.requiresDirectBuffers() && !frame.isDirect() ? toDirect(ctx, frame) : frame.retain();
+        raw = ctx.alloc()
+            .directBuffer(rawSize, rawSize);
+        try {
+            ByteBuffer from = source.nioBuffer();
+            ByteBuffer to = raw.nioBuffer(raw.writerIndex(), rawSize);
+            // See the matching note in PacketAggregator: the position a ByteBuf's nio view starts
+            // at is implementation defined, so measure the codec's output as a difference.
+            int before = to.position();
+            codec.decompress(from, to);
+            if (to.position() - before != rawSize) {
+                throw new CorruptedFrameException("NEB: expanded frame does not match its declared size");
             }
+            raw.writerIndex(raw.writerIndex() + (to.position() - before));
+        } catch (Throwable t) {
+            raw.release();
+            throw t instanceof DecoderException ? (DecoderException) t
+                : new DecoderException("NEB: failed to expand a " + codecType.configName() + " frame", t);
+        } finally {
+            source.release();
         }
         return raw;
     }
@@ -121,9 +127,11 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
     }
 
     private int split(ChannelHandlerContext ctx, ByteBuf raw, List<Object> out) {
-        BiMap<Integer, Class<? extends Packet>> protocol = NebConfig.collectPacketProfile ? ctx.channel()
+        BiMap<Integer, Class<? extends Packet>> receivable = ctx.channel()
             .attr(NetworkManager.attrKeyReceivable)
-            .get() : null;
+            .get();
+        BiMap<Integer, Class<? extends Packet>> protocol = NebConfig.collectPacketProfile ? receivable : null;
+        int payloadId = payloadLookup.idOf(receivable);
         int packets = 0;
         while (raw.isReadable()) {
             int bodySize = NebVarInt.read(raw);
@@ -134,15 +142,17 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
                         + raw.readableBytes()
                         + " are left in the frame");
             }
+            ByteBuf body = raw.readSlice(bodySize);
+            ByteBuf restored = payloadId == CustomPayloadLookup.UNRESOLVED ? null
+                : channelIndex.decode(ctx.alloc(), body, payloadId);
+            // Profiled after the channel name is back, so the report names the mod rather than a token.
             if (protocol != null) {
                 NebStats.inboundProfile()
                     .record(
-                        resolver.resolve(protocol, raw.slice(raw.readerIndex(), bodySize)),
+                        resolver.resolve(protocol, restored == null ? body : restored.duplicate()),
                         bodySize + NebVarInt.sizeOf(bodySize));
             }
-            out.add(
-                raw.readSlice(bodySize)
-                    .retain());
+            out.add(restored == null ? body.retain() : restored);
             packets++;
         }
         return packets;

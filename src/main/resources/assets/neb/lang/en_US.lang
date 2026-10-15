@@ -6,6 +6,13 @@ neb.config.general.compressionThresholdBytes=Compression threshold (bytes)
 neb.config.general.maxExpandedFrameBytes=Maximum expanded frame (bytes)
 neb.config.general.zstdLevel=zstd level
 neb.config.general.zstdWindowLog=zstd window log
+neb.config.general.enableBandwidthDictionary=Train zstd dictionaries
+
+neb.config.general.delayedChunkCache=Retain recently sent chunks
+neb.config.general.delayedChunkCacheSize=Maximum retained chunks per player
+neb.config.general.delayedChunkCacheDistance=Extra chunk retention distance
+neb.config.general.delayedChunkCacheSeconds=Chunk retention timeout (seconds)
+
 neb.config.general.collectPacketProfile=Track bytes per packet kind
 neb.config.general.debugLog=Log every frame
 key.neb.stat=Traffic statistics (Alt+N by default)
