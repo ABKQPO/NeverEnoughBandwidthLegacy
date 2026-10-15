@@ -5,7 +5,9 @@ import net.minecraft.network.INetHandler;
 import net.minecraft.network.NetworkManager;
 import net.minecraftforge.client.ClientCommandHandler;
 
+import cn.ussshenzhou.notenoughbandwidth.client.NebKeyHandler;
 import cn.ussshenzhou.notenoughbandwidth.report.NebClientCommand;
+import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 
 /**
@@ -19,6 +21,11 @@ public class ClientProxy extends CommonProxy {
     public void preInit(FMLPreInitializationEvent event) {
         super.preInit(event);
         ClientCommandHandler.instance.registerCommand(new NebClientCommand());
+        NebKeyHandler keys = new NebKeyHandler();
+        keys.register();
+        FMLCommonHandler.instance()
+            .bus()
+            .register(keys);
     }
 
     @Override

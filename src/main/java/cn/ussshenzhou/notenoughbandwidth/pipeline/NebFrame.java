@@ -34,6 +34,11 @@ public class NebFrame {
 
     public static final int CODEC_MASK = 0x0F;
 
+    public static final int MAX_WIRE_BYTES = (1 << 21) - 1;
+
+    // Leaves room for codec overhead within Minecraft 1.7.10's 21-bit frame length.
+    public static final int MAX_AGGREGATED_BYTES = 1 << 20;
+
     public static int header(PacketCodecType codec) {
         return MARKER | codec.wireId() & CODEC_MASK;
     }
@@ -49,6 +54,9 @@ public class NebFrame {
      * @return the codec the frame was written with, or {@code null} for an unknown wire id
      */
     public static PacketCodecType codecOf(int header) {
+        if ((header & ~CODEC_MASK) != MARKER) {
+            return null;
+        }
         return PacketCodecType.byWireId(header & CODEC_MASK);
     }
 

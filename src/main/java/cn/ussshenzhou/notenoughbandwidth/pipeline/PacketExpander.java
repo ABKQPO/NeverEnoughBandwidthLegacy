@@ -62,6 +62,10 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
         ByteBuf raw = codecType == PacketCodecType.STORED ? frame.retain() : expand(ctx, codecType, frame);
         try {
             int rawSize = raw.readableBytes();
+            if (rawSize <= 0 || rawSize > NebConfig.maxExpandedFrameBytes) {
+                throw new CorruptedFrameException("NEB: invalid expanded frame size " + rawSize);
+            }
+            validatePackets(raw);
             record(rawSize, wireSize, split(ctx, raw, out));
         } finally {
             raw.release();
@@ -104,6 +108,9 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
             // at is implementation defined, so measure the codec's output as a difference.
             int before = to.position();
             codec.decompress(from, to);
+            if (to.position() - before != rawSize) {
+                throw new CorruptedFrameException("NEB: expanded frame does not match its declared size");
+            }
             raw.writerIndex(raw.writerIndex() + (to.position() - before));
         } catch (Throwable t) {
             raw.release();
@@ -148,9 +155,25 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
                         resolver.resolve(protocol, raw.slice(raw.readerIndex(), bodySize)),
                         bodySize + NebVarInt.sizeOf(bodySize));
             }
-            out.add(raw.readBytes(bodySize));
+            out.add(
+                raw.readSlice(bodySize)
+                    .retain());
             packets++;
         }
         return packets;
+    }
+
+    /**
+     * Validates the whole frame before any packet can reach Minecraft's decoder.
+     */
+    private void validatePackets(ByteBuf raw) {
+        ByteBuf view = raw.duplicate();
+        while (view.isReadable()) {
+            int size = NebVarInt.read(view);
+            if (size <= 0 || size > view.readableBytes()) {
+                throw new CorruptedFrameException("NEB: invalid sub packet size " + size);
+            }
+            view.skipBytes(size);
+        }
     }
 }
