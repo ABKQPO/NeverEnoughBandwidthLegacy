@@ -15,17 +15,6 @@ import cpw.mods.fml.common.network.simpleimpl.MessageContext;
 import cpw.mods.fml.relauncher.Side;
 import io.netty.buffer.ByteBuf;
 
-/**
- * Capability announcement, exchanged once per connection in both directions.
- * <p>
- * Nothing is compressed until this message has been received, which is the whole reason it exists:
- * a peer that does not run NEB never answers, so it never gets a frame it cannot read, and a
- * server with the mod installed stays joinable by clients without it. Each side also publishes
- * which backends it supports, so the pair settles on the best one they share rather than on
- * whatever the sender happens to prefer.
- *
- * @author USS_Shenzhou
- */
 public class HelloMessage implements IMessage {
 
     private int protocolVersion;
@@ -66,9 +55,6 @@ public class HelloMessage implements IMessage {
         return label;
     }
 
-    /**
-     * Shared by both sides. The server speaks first, so only a client has to answer.
-     */
     public static class Handler implements IMessageHandler<HelloMessage, IMessage> {
 
         @Override

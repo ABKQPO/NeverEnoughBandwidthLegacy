@@ -5,17 +5,6 @@ import java.util.zip.DataFormatException;
 import java.util.zip.Deflater;
 import java.util.zip.Inflater;
 
-/**
- * Fallback backend built on the JDK deflate implementation.
- * <p>
- * The {@link Deflater} is kept alive across frames and flushed with {@link Deflater#SYNC_FLUSH},
- * which preserves its 32 KiB sliding window. That gives the same cross-packet redundancy removal
- * as the zstd streaming backend, just with a much smaller history and a worse ratio. Its value is
- * that it needs no native code at all, so it works on any platform and cannot be broken by another
- * mod shipping a conflicting zstd build.
- *
- * @author USS_Shenzhou
- */
 public class DeflateStreamCodec implements PacketCodec {
 
     private static final int SCRATCH_CHUNK = 8192;
@@ -112,9 +101,6 @@ public class DeflateStreamCodec implements PacketCodec {
         inflater.end();
     }
 
-    /**
-     * Always available; the JDK ships deflate.
-     */
     public static class Factory implements PacketCodecFactory {
 
         private final int level;

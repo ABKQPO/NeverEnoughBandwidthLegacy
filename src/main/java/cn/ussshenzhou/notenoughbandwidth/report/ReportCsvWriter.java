@@ -9,12 +9,6 @@ import cn.ussshenzhou.notenoughbandwidth.stat.PacketKindSample;
 import cn.ussshenzhou.notenoughbandwidth.stat.TrafficSnapshot;
 import cn.ussshenzhou.notenoughbandwidth.util.ByteSize;
 
-/**
- * Writes the two machine readable halves of a report, one row per fact so a spreadsheet can pivot
- * them without reshaping.
- *
- * @author USS_Shenzhou
- */
 public class ReportCsvWriter {
 
     private static final char SEPARATOR = ',';
@@ -144,6 +138,4 @@ public class ReportCsvWriter {
     public static String ratioText(long rawBytes, long wireBytes) {
         return ByteSize.formatRatio(rawBytes, wireBytes);
     }
-
-    private ReportCsvWriter() {}
 }

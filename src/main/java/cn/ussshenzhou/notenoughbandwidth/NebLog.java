@@ -3,14 +3,9 @@ package cn.ussshenzhou.notenoughbandwidth;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-/**
- * Single logger for the whole mod, usable from the core mod phase onwards.
- *
- * @author USS_Shenzhou
- */
 public class NebLog {
 
-    private static final Logger LOGGER = LogManager.getLogger(ModConstants.MOD_NAME);
+    private static final Logger LOGGER = LogManager.getLogger(Tags.MODNAME);
 
     public static Logger get() {
         return LOGGER;
@@ -31,6 +26,4 @@ public class NebLog {
     public static void debug(String message, Object... args) {
         LOGGER.debug(message, args);
     }
-
-    private NebLog() {}
 }

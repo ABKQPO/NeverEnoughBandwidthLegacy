@@ -2,16 +2,6 @@ package cn.ussshenzhou.notenoughbandwidth.stat;
 
 import java.util.Arrays;
 
-/**
- * Rolling byte-rate estimator.
- * <p>
- * Bytes land in fixed-width time buckets arranged in a ring, so memory is constant and a burst
- * inside a single millisecond is accumulated rather than overwritten. Reading the rate first
- * advances the ring, which is what makes an idle connection decay to zero instead of reporting
- * whatever it last did.
- *
- * @author USS_Shenzhou
- */
 public class RateWindow {
 
     private static final int DEFAULT_BUCKETS = 20;

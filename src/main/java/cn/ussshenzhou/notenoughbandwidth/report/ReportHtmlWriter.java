@@ -8,22 +8,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 
-import cn.ussshenzhou.notenoughbandwidth.ModConstants;
+import cn.ussshenzhou.notenoughbandwidth.Tags;
 import cn.ussshenzhou.notenoughbandwidth.stat.PacketKindSample;
 import cn.ussshenzhou.notenoughbandwidth.stat.TrafficSnapshot;
 import cn.ussshenzhou.notenoughbandwidth.util.ByteSize;
 
-/**
- * Renders a report as one self-contained HTML file: no scripts beyond a theme toggle, no fonts, no
- * network, so it opens from a server's file system or an attached log archive.
- * <p>
- * The charts answer one question - which packet kinds are the stream - so they are single series
- * horizontal bars in one hue, with length carrying magnitude and the hue carrying nothing. Every
- * charted number is also present in the table below it, which is what keeps the file readable when
- * colour is unavailable.
- *
- * @author USS_Shenzhou
- */
 public class ReportHtmlWriter {
 
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -48,7 +37,7 @@ public class ReportHtmlWriter {
 
         out.write("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
         out.write("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
-        out.write("<title>" + ModConstants.MOD_NAME + " report - " + escape(snapshot.side()) + "</title>\n");
+        out.write("<title>" + Tags.MODNAME + " report - " + escape(snapshot.side()) + "</title>\n");
         writeStyle(out);
         out.write("</head>\n<body>\n<div class=\"viz-root\">\n");
 
@@ -137,7 +126,7 @@ public class ReportHtmlWriter {
     private static void writeHeader(Writer out, ReportSnapshot snapshot) throws IOException {
         out.write("<button id=\"theme\" type=\"button\">Toggle theme</button>\n");
         out.write("<div class=\"wrap\">\n");
-        out.write("<h1>" + ModConstants.MOD_NAME + " bandwidth report</h1>\n");
+        out.write("<h1>" + Tags.MODNAME + " bandwidth report</h1>\n");
         out.write(
             "<p class=\"sub\">" + escape(snapshot.side())
                 + " side &middot; "
@@ -497,6 +486,4 @@ public class ReportHtmlWriter {
         }
         return builder.toString();
     }
-
-    private ReportHtmlWriter() {}
 }

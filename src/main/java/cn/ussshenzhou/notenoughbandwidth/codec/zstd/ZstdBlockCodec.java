@@ -11,17 +11,6 @@ import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecFactory;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
 
-/**
- * zstd with one self-contained frame per flush.
- * <p>
- * This exists purely as a compatibility path. It deliberately restricts itself to the API surface
- * that zstd-jni has carried since well before 1.5, because another mod may have shipped an older
- * build of the unrelocatable {@code com.github.luben.zstd} package and won class loading. The
- * aggregation window still helps here - a frame holding a tick worth of packets compresses far
- * better than each packet alone - but there is no history between frames.
- *
- * @author USS_Shenzhou
- */
 public class ZstdBlockCodec implements PacketCodec {
 
     private final ZstdCompressCtx compressCtx;
@@ -70,10 +59,6 @@ public class ZstdBlockCodec implements PacketCodec {
         advance(dst, dst.position() + written);
     }
 
-    /**
-     * Java 9 made {@code ByteBuffer.position(int)} covariant, so calling it through the subtype
-     * would emit a post-8 descriptor. Going through {@link Buffer} keeps the bytecode on Java 8.
-     */
     private static void advance(ByteBuffer buffer, int position) {
         ((Buffer) buffer).position(position);
     }
@@ -84,9 +69,6 @@ public class ZstdBlockCodec implements PacketCodec {
         decompressCtx.close();
     }
 
-    /**
-     * Available whenever the native library loaded at all.
-     */
     public static class Factory implements PacketCodecFactory {
 
         private final int level;

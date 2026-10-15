@@ -18,18 +18,6 @@ import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecRegistry;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
 import cn.ussshenzhou.notenoughbandwidth.stat.NebStats;
 
-/**
- * Server side entry point for inspecting and exporting the numbers.
- *
- * <pre>
- * /neb stat     a summary plus the heaviest packet kinds, in chat
- * /neb report   writes an HTML report and two CSV files under neb-reports/
- * /neb reset    zeroes every counter, so a measurement can start from a known point
- * /neb codec    which compression backends this installation can actually use
- * </pre>
- *
- * @author USS_Shenzhou
- */
 public class NebCommand extends CommandBase {
 
     private static final String REPORT_DIRECTORY = "neb-reports";

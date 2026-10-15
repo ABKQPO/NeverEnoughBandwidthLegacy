@@ -10,12 +10,6 @@ import cn.ussshenzhou.notenoughbandwidth.stat.PacketKindSample;
 import cn.ussshenzhou.notenoughbandwidth.stat.TrafficSnapshot;
 import cn.ussshenzhou.notenoughbandwidth.util.ByteSize;
 
-/**
- * The chat rendering of a snapshot, shared by the server and the client command so both read the
- * same.
- *
- * @author USS_Shenzhou
- */
 public class StatLines {
 
     private static final String KEY = EnumChatFormatting.GRAY.toString();
@@ -127,6 +121,4 @@ public class StatLines {
     private static String decimal(double value) {
         return String.format(Locale.ROOT, "%.1f", value);
     }
-
-    private StatLines() {}
 }

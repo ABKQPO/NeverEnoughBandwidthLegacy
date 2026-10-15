@@ -9,9 +9,6 @@ import cpw.mods.fml.client.registry.ClientRegistry;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
 
-/**
- * Opens the statistics screen after Minecraft has finished processing input.
- */
 public class NebKeyHandler {
 
     private final KeyBinding statistics = new KeyBinding("key.neb.stat", Keyboard.KEY_N, "key.categories.neb");
@@ -27,9 +24,7 @@ public class NebKeyHandler {
         }
         Minecraft client = Minecraft.getMinecraft();
         while (statistics.isPressed()) {
-            // Vanilla 1.7.10 has no modifier-aware key binding; keep Alt for the default N key.
-            boolean modifier = statistics.getKeyCode() != Keyboard.KEY_N || Keyboard.isKeyDown(Keyboard.KEY_LMENU)
-                || Keyboard.isKeyDown(Keyboard.KEY_RMENU);
+            boolean modifier = Keyboard.isKeyDown(Keyboard.KEY_LMENU) || Keyboard.isKeyDown(Keyboard.KEY_RMENU);
             if (modifier && client.theWorld != null && client.currentScreen == null) {
                 client.displayGuiScreen(new NebStatScreen());
             }

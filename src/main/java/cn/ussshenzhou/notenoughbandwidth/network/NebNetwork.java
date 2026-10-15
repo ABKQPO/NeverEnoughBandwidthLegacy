@@ -13,14 +13,6 @@ import cpw.mods.fml.common.network.simpleimpl.MessageContext;
 import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.relauncher.Side;
 
-/**
- * The mod's FML channel: a capability handshake and a statistics request, nothing else.
- * <p>
- * This channel deliberately carries no bulk data. The compression itself happens below the packet
- * layer, so there is nothing for it to transport.
- *
- * @author USS_Shenzhou
- */
 public class NebNetwork {
 
     private static final int HELLO = 0;
@@ -37,16 +29,6 @@ public class NebNetwork {
         channel.registerMessage(StatReportMessage.Handler.class, StatReportMessage.class, STAT_REPORT, Side.CLIENT);
     }
 
-    /**
-     * Sends a hello down a connection directly, bypassing the usual addressing helpers.
-     * <p>
-     * Neither of the convenient routes works at handshake time. FML's reply target is declared
-     * server-only, so a client handler cannot answer by returning a message, and the client's
-     * "send to server" helper resolves the connection through the player entity, which does not
-     * exist yet. Writing to the connection we were handed avoids both problems and works
-     * identically on either side, because FML's dispatcher picks the right custom payload packet
-     * for its own direction.
-     */
     public static void sendHello(NetworkManager manager, String label) {
         if (channel == null || manager == null || !manager.isChannelOpen()) {
             NebLog.warn(
@@ -65,11 +47,6 @@ public class NebNetwork {
         }
     }
 
-    /**
-     * Sends the server's hello down a connection that does not have a usable player handler yet,
-     * which is the earliest moment a custom payload can travel. Doing it this early means the
-     * initial terrain burst is already compressed.
-     */
     public static void greet(NetworkManager manager) {
         sendHello(manager, "server");
     }
@@ -80,9 +57,6 @@ public class NebNetwork {
         }
     }
 
-    /**
-     * @return the connection a received message arrived on, or {@code null} if it has gone away
-     */
     public static NetworkManager managerOf(MessageContext ctx) {
         if (ctx.side == Side.SERVER) {
             return ctx.getServerHandler().netManager;
@@ -95,9 +69,6 @@ public class NebNetwork {
         return player == null ? "unknown" : player.getCommandSenderName();
     }
 
-    /**
-     * @return whether the configuration opts this player out of a history-keeping backend
-     */
     public static boolean deniesContext(MessageContext ctx) {
         EntityPlayerMP player = ctx.getServerHandler().playerEntity;
         if (player == null) {

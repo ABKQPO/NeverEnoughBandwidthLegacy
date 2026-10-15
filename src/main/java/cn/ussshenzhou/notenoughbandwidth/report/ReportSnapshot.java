@@ -5,14 +5,6 @@ import java.util.List;
 import cn.ussshenzhou.notenoughbandwidth.stat.PacketKindSample;
 import cn.ussshenzhou.notenoughbandwidth.stat.TrafficSnapshot;
 
-/**
- * Everything a report needs, frozen at one instant.
- * <p>
- * Written out longhand rather than as a record so the jar stays plain Java 8 bytecode; see the
- * note next to {@code enableModernJavaSyntax} in gradle.properties.
- *
- * @author USS_Shenzhou
- */
 public class ReportSnapshot {
 
     private final long takenAtMillis;

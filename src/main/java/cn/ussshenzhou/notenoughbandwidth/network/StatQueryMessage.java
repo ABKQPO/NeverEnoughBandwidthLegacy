@@ -9,13 +9,6 @@ import cpw.mods.fml.common.network.simpleimpl.IMessageHandler;
 import cpw.mods.fml.common.network.simpleimpl.MessageContext;
 import io.netty.buffer.ByteBuf;
 
-/**
- * Client asks the server for its side of the numbers, so a player can compare both ends of the
- * same link without reading the server console. Answered only for operators, because traffic
- * figures expose who is doing what on the server.
- *
- * @author USS_Shenzhou
- */
 public class StatQueryMessage implements IMessage {
 
     @Override

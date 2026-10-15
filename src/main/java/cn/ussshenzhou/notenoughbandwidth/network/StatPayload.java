@@ -8,12 +8,6 @@ import cn.ussshenzhou.notenoughbandwidth.stat.TrafficSnapshot;
 import cpw.mods.fml.common.network.ByteBufUtils;
 import io.netty.buffer.ByteBuf;
 
-/**
- * Serialises a {@link TrafficSnapshot} plus the heaviest packet kinds, so one side can show the
- * other side's view of the same link.
- *
- * @author USS_Shenzhou
- */
 public class StatPayload {
 
     public static final int MAX_KINDS = 24;
@@ -69,9 +63,6 @@ public class StatPayload {
         return samples;
     }
 
-    /**
-     * Guards against a reply that would not fit in a 1.7.10 custom payload.
-     */
     public static List<PacketKindSample> trim(List<PacketKindSample> samples) {
         return samples.size() <= MAX_KINDS ? samples : new ArrayList<>(samples.subList(0, MAX_KINDS));
     }

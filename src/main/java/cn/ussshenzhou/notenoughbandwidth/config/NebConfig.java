@@ -4,15 +4,9 @@ import com.gtnewhorizon.gtnhlib.config.Config;
 import com.gtnewhorizon.gtnhlib.config.ConfigException;
 import com.gtnewhorizon.gtnhlib.config.ConfigurationManager;
 
-import cn.ussshenzhou.notenoughbandwidth.ModConstants;
+import cn.ussshenzhou.notenoughbandwidth.Tags;
 
-/**
- * Every tunable of the mod. Registered from the core mod so that the pipeline can read it before
- * the first connection is accepted.
- *
- * @author USS_Shenzhou
- */
-@Config(modid = ModConstants.MOD_ID, filename = "notenoughbandwidth", category = "general")
+@Config(modid = Tags.MODID, filename = "notenoughbandwidth")
 @Config.LangKeyPattern(pattern = "neb.config.%cat.%field", fullyQualified = true)
 @Config.Comment("NotEnoughBandwidth - aggregates and compresses the Minecraft packet stream.")
 public class NebConfig {
@@ -82,9 +76,6 @@ public class NebConfig {
     @Config.DefaultBoolean(false)
     public static boolean debugLog = false;
 
-    /**
-     * @return whether this player asked, by configuration, not to be given a history-keeping backend
-     */
     public static boolean deniesContext(String name, String uuid) {
         for (String entry : playersWithoutContext) {
             if (entry == null || entry.isEmpty()) {

@@ -8,37 +8,11 @@ import cn.ussshenzhou.notenoughbandwidth.session.NebSessionRegistry;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelPipeline;
 
-/**
- * Decides where in a Netty pipeline the two NEB handlers belong, and refuses to install them when
- * the pipeline does not look like what we expect.
- *
- * <pre>
- * head → timeout → [legacy_query] → splitter → neb_expander → decoder
- *                                                              ↓
- *      ← prepender ← neb_aggregator ← encoder ← packet_handler ←
- * </pre>
- *
- * The aggregator goes immediately before {@code encoder} so that, walking outbound from the tail,
- * it is reached after the encoder has produced a packet body and before the prepender turns it
- * into a frame. The expander goes immediately after {@code splitter} for the mirror reason. Both
- * positions survive the later insertion of the encryption handlers, which Minecraft places around
- * {@code splitter} and {@code prepender}.
- * <p>
- * Handlers are installed as soon as the channel goes active, long before compression is turned on.
- * That ordering is deliberate: the expander has to already be in place when the first frame of a
- * peer that enabled compression before us arrives, and installing it later would leave a window in
- * which frames are read with the wrong reader.
- *
- * @author USS_Shenzhou
- */
 public class NebPipeline {
 
     private static final String ENCODER = "encoder";
     private static final String SPLITTER = "splitter";
 
-    /**
-     * @return the session now backing this channel, or {@code null} when NEB does not apply
-     */
     public static NebSession install(Channel channel) {
         if (!NebConfig.enabled || channel == null) {
             return null;
@@ -64,6 +38,4 @@ public class NebPipeline {
             return null;
         }
     }
-
-    private NebPipeline() {}
 }

@@ -15,8 +15,6 @@ import java.nio.ByteBuffer;
  * All buffers are passed with {@code position}/{@code limit} already set to the region of interest.
  * A codec must consume {@code src} completely and leave {@code dst} with its {@code position} just
  * past the bytes it produced.
- *
- * @author USS_Shenzhou
  */
 public interface PacketCodec extends Closeable {
 

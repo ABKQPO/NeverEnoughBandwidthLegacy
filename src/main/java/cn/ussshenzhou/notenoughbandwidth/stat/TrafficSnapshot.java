@@ -1,14 +1,5 @@
 package cn.ussshenzhou.notenoughbandwidth.stat;
 
-/**
- * A point-in-time copy of {@link TrafficStats}, safe to pass between threads, to put in a packet,
- * or to add up across connections.
- * <p>
- * Written out longhand rather than as a record so the jar stays plain Java 8 bytecode; see the
- * note next to {@code enableModernJavaSyntax} in gradle.properties.
- *
- * @author USS_Shenzhou
- */
 public class TrafficSnapshot {
 
     public static final TrafficSnapshot EMPTY = new TrafficSnapshot(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);

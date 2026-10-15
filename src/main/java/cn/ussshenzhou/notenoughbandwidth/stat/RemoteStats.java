@@ -1,14 +1,8 @@
 package cn.ussshenzhou.notenoughbandwidth.stat;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * The other side's last reported numbers, held so a client command can print both ends of the link.
- *
- * @author USS_Shenzhou
- */
 public class RemoteStats {
 
     private static volatile TrafficSnapshot snapshot = TrafficSnapshot.EMPTY;
@@ -21,8 +15,8 @@ public class RemoteStats {
         List<PacketKindSample> newInbound) {
         snapshot = newSnapshot;
         codec = newCodec;
-        outbound = Collections.unmodifiableList(new ArrayList<>(newOutbound));
-        inbound = Collections.unmodifiableList(new ArrayList<>(newInbound));
+        outbound = List.copyOf(newOutbound);
+        inbound = List.copyOf(newInbound);
         receivedAt = System.currentTimeMillis();
     }
 

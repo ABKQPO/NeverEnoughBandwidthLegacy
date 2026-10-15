@@ -10,20 +10,6 @@ import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
 import cn.ussshenzhou.notenoughbandwidth.stat.TrafficStats;
 import io.netty.channel.Channel;
 
-/**
- * Everything NEB knows about one connection.
- * <p>
- * Compression is asymmetric on purpose. The outbound codec is only created once the peer has
- * announced that it runs NEB too, which is what lets the mod be installed on a server without
- * breaking anyone. Inbound codecs are created on demand from the wire id in each frame header, so
- * a peer that picked a different backend than we would have still gets decoded correctly.
- * <p>
- * Codec instances are stateful native objects and are only ever touched from this channel's event
- * loop. The flags that cross threads are volatile and the codec creation itself is bounced onto
- * the event loop, so no lock is needed anywhere.
- *
- * @author USS_Shenzhou
- */
 public class NebSession {
 
     private final Channel channel;
@@ -93,9 +79,6 @@ public class NebSession {
             });
     }
 
-    /**
-     * Event loop only.
-     */
     public PacketCodec outboundCodec() {
         if (outboundCodec == null || outboundCodec.type() != outboundType) {
             closeOutboundCodec();
@@ -104,9 +87,6 @@ public class NebSession {
         return outboundCodec;
     }
 
-    /**
-     * Event loop only.
-     */
     public PacketCodec inboundCodec(PacketCodecType type) {
         PacketCodec codec = inboundCodecs.get(type);
         if (codec == null) {
@@ -116,9 +96,6 @@ public class NebSession {
         return codec;
     }
 
-    /**
-     * Releases every native context this session holds. Idempotent.
-     */
     public void release() {
         closeOutboundCodec();
         for (PacketCodec codec : inboundCodecs.values()) {

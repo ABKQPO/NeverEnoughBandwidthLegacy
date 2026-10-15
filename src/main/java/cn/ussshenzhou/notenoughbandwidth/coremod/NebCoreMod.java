@@ -12,12 +12,6 @@ import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 import cn.ussshenzhou.notenoughbandwidth.mixin.Mixins;
 import cpw.mods.fml.relauncher.IFMLLoadingPlugin;
 
-/**
- * Core mod half of the mod. Exists only so the pipeline mixin lands before Minecraft's networking
- * classes are loaded, and so the config is readable by the time the first connection arrives.
- *
- * @author USS_Shenzhou
- */
 @IFMLLoadingPlugin.MCVersion("1.7.10")
 public class NebCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
 

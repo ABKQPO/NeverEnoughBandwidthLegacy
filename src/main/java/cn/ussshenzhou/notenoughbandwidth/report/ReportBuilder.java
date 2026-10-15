@@ -12,11 +12,6 @@ import cn.ussshenzhou.notenoughbandwidth.session.NebSessionRegistry;
 import cn.ussshenzhou.notenoughbandwidth.stat.NebStats;
 import cn.ussshenzhou.notenoughbandwidth.stat.TrafficSnapshot;
 
-/**
- * Freezes the live counters into a {@link ReportSnapshot}.
- *
- * @author USS_Shenzhou
- */
 public class ReportBuilder {
 
     public static ReportSnapshot capture(String side) {
@@ -53,6 +48,4 @@ public class ReportBuilder {
                 .reversed());
         return samples;
     }
-
-    private ReportBuilder() {}
 }

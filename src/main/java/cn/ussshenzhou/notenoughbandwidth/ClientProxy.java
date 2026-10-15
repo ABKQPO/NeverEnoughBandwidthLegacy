@@ -10,11 +10,6 @@ import cn.ussshenzhou.notenoughbandwidth.report.NebClientCommand;
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 
-/**
- * Client-only additions: the client side report command and the lookup of the local connection.
- *
- * @author USS_Shenzhou
- */
 public class ClientProxy extends CommonProxy {
 
     @Override

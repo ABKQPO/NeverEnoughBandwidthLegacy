@@ -1,13 +1,5 @@
 package cn.ussshenzhou.notenoughbandwidth.stat;
 
-/**
- * Immutable view of one packet kind's share of the stream, produced when a report is taken.
- * <p>
- * Written out longhand rather than as a record so the jar stays plain Java 8 bytecode; see the
- * note next to {@code enableModernJavaSyntax} in gradle.properties.
- *
- * @author USS_Shenzhou
- */
 public class PacketKindSample {
 
     private final String label;

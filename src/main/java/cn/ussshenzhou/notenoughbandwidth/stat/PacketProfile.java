@@ -7,16 +7,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Attributes raw bytes to packet kinds so a report can say which traffic is actually worth money.
- * <p>
- * Compression happens per frame, not per packet, so a per-packet compressed size does not exist.
- * What does exist, and is what you need in order to act, is the pre-compression share of every
- * kind: that is the number that tells you which mod or which vanilla packet is flooding the link.
- * The frame-level ratio is reported separately by {@link TrafficStats}.
- *
- * @author USS_Shenzhou
- */
 public class PacketProfile {
 
     private final Map<String, Entry> entries = new ConcurrentHashMap<>();

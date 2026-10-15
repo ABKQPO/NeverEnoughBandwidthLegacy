@@ -13,9 +13,6 @@ import cn.ussshenzhou.notenoughbandwidth.stat.RemoteStats;
 import cn.ussshenzhou.notenoughbandwidth.stat.TrafficSnapshot;
 import cn.ussshenzhou.notenoughbandwidth.util.ByteSize;
 
-/**
- * Live connection statistics rendered from the existing traffic snapshots.
- */
 public class NebStatScreen extends GuiScreen {
 
     private static final int QUERY = 0;

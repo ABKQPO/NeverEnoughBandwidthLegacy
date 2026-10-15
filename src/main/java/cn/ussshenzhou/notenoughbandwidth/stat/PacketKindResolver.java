@@ -13,19 +13,6 @@ import com.google.common.collect.BiMap;
 import cn.ussshenzhou.notenoughbandwidth.util.NebVarInt;
 import io.netty.buffer.ByteBuf;
 
-/**
- * Turns an encoded packet body back into a human readable label for the report.
- * <p>
- * The body is read with absolute indices only, so the buffer handed to the rest of the pipeline is
- * untouched. Custom payload packets get their mod channel appended, which is the whole point: on a
- * large pack almost everything interesting travels as a custom payload, and "S3FPacketCustomPayload"
- * on its own would tell you nothing about which mod to go and fix.
- * <p>
- * One instance belongs to one direction of one connection and is only ever touched from that
- * connection's event loop, so the caches need no synchronisation.
- *
- * @author USS_Shenzhou
- */
 public class PacketKindResolver {
 
     private static final String UNKNOWN = "unknown";
@@ -54,12 +41,7 @@ public class PacketKindResolver {
         if (channel == null) {
             return name;
         }
-        String cached = labelsByChannel.get(channel);
-        if (cached == null) {
-            cached = name + '[' + channel + ']';
-            labelsByChannel.put(channel, cached);
-        }
-        return cached;
+        return labelsByChannel.computeIfAbsent(channel, c -> name + '[' + c + ']');
     }
 
     private String nameOf(BiMap<Integer, Class<? extends Packet>> protocol, int packetId) {

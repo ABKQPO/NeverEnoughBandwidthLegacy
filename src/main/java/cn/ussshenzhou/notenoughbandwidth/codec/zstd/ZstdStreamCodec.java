@@ -11,27 +11,8 @@ import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecFactory;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
 
-/**
- * The backend this mod exists for: one zstd context per connection, flushed once per frame.
- * <p>
- * Because the context survives between frames, the compressor keeps a window of everything it has
- * already sent on this connection. Minecraft traffic is extremely repetitive at that scale - the
- * same entity ids, the same mod channel names, the same NBT keys, over and over - so the second
- * occurrence of a structure costs a few bits instead of its full size. That is a very different
- * result from compressing each packet on its own, which is what makes the held-back aggregation
- * window worthwhile.
- * <p>
- * Frames are written magicless and without a content size field, as both are redundant here: the
- * frame length is already known from the Minecraft frame header and the raw size travels in the
- * NEB header.
- *
- * @author USS_Shenzhou
- */
 public class ZstdStreamCodec implements PacketCodec {
 
-    /**
-     * Guards against a backend that stops making progress. A frame needs one or two iterations.
-     */
     private static final int ITERATION_LIMIT = 1024;
 
     private final ZstdCompressCtx compressCtx;
@@ -103,9 +84,6 @@ public class ZstdStreamCodec implements PacketCodec {
         decompressCtx.close();
     }
 
-    /**
-     * Only offers itself when the zstd-jni build on the classpath actually exposes the streaming API.
-     */
     public static class Factory implements PacketCodecFactory {
 
         private final int level;

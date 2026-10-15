@@ -27,22 +27,6 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 
-/**
- * Collects the encoded packet bodies Minecraft hands to the wire and emits them as one compressed
- * frame.
- * <p>
- * It sits between Minecraft's packet encoder and its length prepender, so what arrives here is a
- * finished packet body and what leaves is a finished frame body. Working at that level is what
- * makes the mod indifferent to who produced the packet: vanilla packets, FML handshake traffic and
- * every mod's custom payload all look the same, and none of their codecs have to be re-entered.
- * <p>
- * Writes are buffered rather than forwarded because Minecraft flushes after every single packet,
- * which would otherwise leave nothing to aggregate. The buffer is released by the configured time
- * window, by a size threshold, or by the channel closing - the last one matters, because a kick
- * packet is normally followed immediately by a close and its bytes still have to get out.
- *
- * @author USS_Shenzhou
- */
 public class PacketAggregator extends ChannelOutboundHandlerAdapter {
 
     private static final int INITIAL_CAPACITY = 8192;
@@ -62,30 +46,24 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
 
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) {
-        flushTask = new Runnable() {
-
-            @Override
-            public void run() {
-                flushScheduled = false;
-                emit(ctx);
-            }
+        flushTask = () -> {
+            flushScheduled = false;
+            emit(ctx);
         };
     }
 
     @Override
-    public void write(ChannelHandlerContext ctx, Object message, ChannelPromise promise) throws Exception {
-        if (!(message instanceof ByteBuf) || !session.outboundEnabled()) {
-            if (message instanceof ByteBuf) {
+    public void write(ChannelHandlerContext ctx, Object message, ChannelPromise promise) {
+        if (!(message instanceof ByteBuf body) || !session.outboundEnabled()) {
+            if (message instanceof ByteBuf passed) {
                 // Still measured, so the reported ratio covers the whole stream rather than only
                 // the part that happened to be compressible.
-                ByteBuf passed = (ByteBuf) message;
                 int size = passed.readableBytes() + NebVarInt.sizeOf(passed.readableBytes());
                 record(size, size, 1);
             }
             ctx.write(message, promise);
             return;
         }
-        ByteBuf body = (ByteBuf) message;
         if (!body.isReadable()) {
             ctx.write(body, promise);
             return;
@@ -119,12 +97,8 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
         }
     }
 
-    /**
-     * Minecraft flushes per packet, so a flush only gets forwarded when there is nothing waiting;
-     * otherwise the scheduled emit owns it.
-     */
     @Override
-    public void flush(ChannelHandlerContext ctx) throws Exception {
+    public void flush(ChannelHandlerContext ctx) {
         if (accumulator == null || !accumulator.isReadable()) {
             ctx.flush();
             return;
@@ -133,13 +107,13 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
     }
 
     @Override
-    public void close(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception {
+    public void close(ChannelHandlerContext ctx, ChannelPromise promise) {
         emit(ctx);
         ctx.close(promise);
     }
 
     @Override
-    public void disconnect(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception {
+    public void disconnect(ChannelHandlerContext ctx, ChannelPromise promise) {
         emit(ctx);
         ctx.disconnect(promise);
     }
@@ -210,34 +184,20 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
         record(rawSize, wireSize, packets);
 
         ChannelFuture future = ctx.write(frame);
-        future.addListener(new ChannelFutureListener() {
-
-            @Override
-            public void operationComplete(ChannelFuture completed) {
-                if (completed.isSuccess()) {
-                    for (ChannelPromise promise : promises) {
-                        promise.trySuccess();
-                    }
-                } else {
-                    for (ChannelPromise promise : promises) {
-                        promise.tryFailure(completed.cause());
-                    }
+        future.addListener((ChannelFutureListener) completed -> {
+            if (completed.isSuccess()) {
+                for (ChannelPromise promise : promises) {
+                    promise.trySuccess();
+                }
+            } else {
+                for (ChannelPromise promise : promises) {
+                    promise.tryFailure(completed.cause());
                 }
             }
         });
         ctx.flush();
     }
 
-    /**
-     * Sends the buffered packets as ordinary Minecraft frames, one each.
-     * <p>
-     * This is the path taken whenever compression would not pay for itself - a frame below the
-     * threshold, or a connection that settled on the pass-through backend. Emitting the bodies
-     * separately reproduces the vanilla stream byte for byte, which matters: wrapping three
-     * fifteen-byte movement packets in a NEB frame costs a header and buys nothing, and an idle
-     * client sends almost nothing else. Every original write promise is handed to the frame that
-     * actually carries its packet, so completion semantics stay exactly as vanilla had them.
-     */
     private void emitPlain(ChannelHandlerContext ctx, List<ChannelPromise> promises, int rawSize, int packets) {
         ByteBuf raw = accumulator;
         accumulator = null;
@@ -284,28 +244,30 @@ public class PacketAggregator extends ChannelOutboundHandlerAdapter {
     }
 
     private ByteBuf compressedFrame(ChannelHandlerContext ctx, PacketCodecType type, int rawSize) {
-        PacketCodec codec = session.outboundCodec();
-        int bound = codec.compressBound(rawSize);
-        int headerSize = 1 + NebVarInt.sizeOf(rawSize);
-        if (bound < 0 || bound > NebFrame.MAX_WIRE_BYTES - headerSize) {
-            throw new IllegalStateException("NEB: codec bound exceeds Minecraft's frame length limit");
-        }
-        ByteBuf frame = ctx.alloc()
-            .directBuffer(headerSize + bound);
-        try {
-            frame.writeByte(NebFrame.header(type));
-            NebVarInt.write(frame, rawSize);
-            ByteBuffer source = accumulator.nioBuffer();
-            ByteBuffer destination = frame.nioBuffer(frame.writerIndex(), bound);
-            // Some ByteBuf implementations hand back their internal buffer positioned at the
-            // requested index rather than a zero-based slice, so the only portable way to learn
-            // how much the codec wrote is to diff the position.
-            int before = destination.position();
-            codec.compress(source, destination);
-            frame.writerIndex(frame.writerIndex() + (destination.position() - before));
-        } catch (Throwable t) {
-            frame.release();
-            throw t;
+        ByteBuf frame;
+        try (PacketCodec codec = session.outboundCodec()) {
+            int bound = codec.compressBound(rawSize);
+            int headerSize = 1 + NebVarInt.sizeOf(rawSize);
+            if (bound < 0 || bound > NebFrame.MAX_WIRE_BYTES - headerSize) {
+                throw new IllegalStateException("NEB: codec bound exceeds Minecraft's frame length limit");
+            }
+            frame = ctx.alloc()
+                .directBuffer(headerSize + bound);
+            try {
+                frame.writeByte(NebFrame.header(type));
+                NebVarInt.write(frame, rawSize);
+                ByteBuffer source = accumulator.nioBuffer();
+                ByteBuffer destination = frame.nioBuffer(frame.writerIndex(), bound);
+                // Some ByteBuf implementations hand back their internal buffer positioned at the
+                // requested index rather than a zero-based slice, so the only portable way to learn
+                // how much the codec wrote is to diff the position.
+                int before = destination.position();
+                codec.compress(source, destination);
+                frame.writerIndex(frame.writerIndex() + (destination.position() - before));
+            } catch (Throwable t) {
+                frame.release();
+                throw t;
+            }
         }
         accumulator.release();
         return frame;

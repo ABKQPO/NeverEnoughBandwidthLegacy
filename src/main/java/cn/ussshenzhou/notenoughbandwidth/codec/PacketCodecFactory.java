@@ -5,8 +5,6 @@ package cn.ussshenzhou.notenoughbandwidth.codec;
  * <p>
  * Registering a factory is the only thing a new backend has to do to become selectable, both from
  * the config and from the capability handshake.
- *
- * @author USS_Shenzhou
  */
 public interface PacketCodecFactory {
 
@@ -18,9 +16,6 @@ public interface PacketCodecFactory {
      */
     boolean available();
 
-    /**
-     * Human readable reason shown in logs and reports, typically the backing library version.
-     */
     String describe();
 
     PacketCodec create();

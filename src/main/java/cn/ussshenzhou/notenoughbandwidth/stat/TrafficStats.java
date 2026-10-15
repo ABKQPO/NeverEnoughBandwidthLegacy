@@ -2,16 +2,6 @@ package cn.ussshenzhou.notenoughbandwidth.stat;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Byte and packet totals for one connection, or for a whole side when aggregated.
- * <p>
- * "raw" is what the vanilla stream would have put on the wire: the concatenated packet bodies plus
- * the per-packet length prefixes NEB adds inside a frame. "wire" is what NEB actually wrote,
- * header and all. The ratio between the two is the honest answer to "how much did this save",
- * because it is measured at the same point in the pipeline for both numbers.
- *
- * @author USS_Shenzhou
- */
 public class TrafficStats {
 
     private final AtomicLong outboundRaw = new AtomicLong();

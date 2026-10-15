@@ -18,19 +18,6 @@ import cn.ussshenzhou.notenoughbandwidth.network.NebNetwork;
 import cn.ussshenzhou.notenoughbandwidth.stat.NebStats;
 import cn.ussshenzhou.notenoughbandwidth.stat.RemoteStats;
 
-/**
- * Client side counterpart of {@link NebCommand}, so a player can measure their own link without
- * server access.
- *
- * <pre>
- * /nebclient stat     this client's own summary, plus the server's if it has answered
- * /nebclient report   writes an HTML report and two CSV files under neb-reports/
- * /nebclient reset    zeroes this client's counters
- * /nebclient server   asks the server for its numbers; needs operator rights there
- * </pre>
- *
- * @author USS_Shenzhou
- */
 public class NebClientCommand extends CommandBase {
 
     private static final String REPORT_DIRECTORY = "neb-reports";

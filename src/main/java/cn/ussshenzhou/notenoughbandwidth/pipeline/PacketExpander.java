@@ -24,17 +24,6 @@ import io.netty.handler.codec.CorruptedFrameException;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.MessageToMessageDecoder;
 
-/**
- * Undoes {@link PacketAggregator}: expands a NEB frame and hands the packet bodies on one at a
- * time, exactly as Minecraft's frame splitter would have.
- * <p>
- * It sits between the splitter and the packet decoder, and decides per frame whether that frame is
- * one of ours by looking at the marker bit. A frame that is not ours is forwarded untouched, which
- * is what lets the two sides of a connection switch compression on at different moments without
- * ever misreading the stream.
- *
- * @author USS_Shenzhou
- */
 public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
 
     private final NebSession session;
@@ -97,34 +86,33 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
             throw new DecoderException(
                 "NEB: peer sent a " + codecType.configName() + " frame but this side cannot decode it");
         }
-        PacketCodec codec = session.inboundCodec(codecType);
-        ByteBuf source = codec.requiresDirectBuffers() && !frame.isDirect() ? toDirect(ctx, frame) : frame.retain();
-        ByteBuf raw = ctx.alloc()
-            .directBuffer(rawSize, rawSize);
-        try {
-            ByteBuffer from = source.nioBuffer();
-            ByteBuffer to = raw.nioBuffer(raw.writerIndex(), rawSize);
-            // See the matching note in PacketAggregator: the position a ByteBuf's nio view starts
-            // at is implementation defined, so measure the codec's output as a difference.
-            int before = to.position();
-            codec.decompress(from, to);
-            if (to.position() - before != rawSize) {
-                throw new CorruptedFrameException("NEB: expanded frame does not match its declared size");
+        ByteBuf raw;
+        try (PacketCodec codec = session.inboundCodec(codecType)) {
+            ByteBuf source = codec.requiresDirectBuffers() && !frame.isDirect() ? toDirect(ctx, frame) : frame.retain();
+            raw = ctx.alloc()
+                .directBuffer(rawSize, rawSize);
+            try {
+                ByteBuffer from = source.nioBuffer();
+                ByteBuffer to = raw.nioBuffer(raw.writerIndex(), rawSize);
+                // See the matching note in PacketAggregator: the position a ByteBuf's nio view starts
+                // at is implementation defined, so measure the codec's output as a difference.
+                int before = to.position();
+                codec.decompress(from, to);
+                if (to.position() - before != rawSize) {
+                    throw new CorruptedFrameException("NEB: expanded frame does not match its declared size");
+                }
+                raw.writerIndex(raw.writerIndex() + (to.position() - before));
+            } catch (Throwable t) {
+                raw.release();
+                throw t instanceof DecoderException ? (DecoderException) t
+                    : new DecoderException("NEB: failed to expand a " + codecType.configName() + " frame", t);
+            } finally {
+                source.release();
             }
-            raw.writerIndex(raw.writerIndex() + (to.position() - before));
-        } catch (Throwable t) {
-            raw.release();
-            throw t instanceof DecoderException ? (DecoderException) t
-                : new DecoderException("NEB: failed to expand a " + codecType.configName() + " frame", t);
-        } finally {
-            source.release();
         }
         return raw;
     }
 
-    /**
-     * Minecraft's frame splitter produces heap buffers, which the native backends cannot read.
-     */
     private ByteBuf toDirect(ChannelHandlerContext ctx, ByteBuf frame) {
         ByteBuf direct = ctx.alloc()
             .directBuffer(frame.readableBytes());
@@ -132,9 +120,6 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
         return direct;
     }
 
-    /**
-     * @return how many packet bodies the frame held
-     */
     private int split(ChannelHandlerContext ctx, ByteBuf raw, List<Object> out) {
         BiMap<Integer, Class<? extends Packet>> protocol = NebConfig.collectPacketProfile ? ctx.channel()
             .attr(NetworkManager.attrKeyReceivable)
@@ -163,9 +148,6 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
         return packets;
     }
 
-    /**
-     * Validates the whole frame before any packet can reach Minecraft's decoder.
-     */
     private void validatePackets(ByteBuf raw) {
         ByteBuf view = raw.duplicate();
         while (view.isReadable()) {

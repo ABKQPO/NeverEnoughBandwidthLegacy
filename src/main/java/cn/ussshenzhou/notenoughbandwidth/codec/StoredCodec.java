@@ -2,11 +2,6 @@ package cn.ussshenzhou.notenoughbandwidth.codec;
 
 import java.nio.ByteBuffer;
 
-/**
- * Pass-through backend. Frames are still aggregated, just never compressed.
- *
- * @author USS_Shenzhou
- */
 public class StoredCodec implements PacketCodec {
 
     @Override
@@ -37,9 +32,6 @@ public class StoredCodec implements PacketCodec {
     @Override
     public void close() {}
 
-    /**
-     * Always available, so it is the last resort of {@link PacketCodecRegistry}.
-     */
     public static class Factory implements PacketCodecFactory {
 
         @Override

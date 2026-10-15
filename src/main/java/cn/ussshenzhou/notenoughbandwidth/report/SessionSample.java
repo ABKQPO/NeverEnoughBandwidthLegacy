@@ -2,14 +2,6 @@ package cn.ussshenzhou.notenoughbandwidth.report;
 
 import cn.ussshenzhou.notenoughbandwidth.stat.TrafficSnapshot;
 
-/**
- * One connection's line in a report.
- * <p>
- * Written out longhand rather than as a record so the jar stays plain Java 8 bytecode; see the
- * note next to {@code enableModernJavaSyntax} in gradle.properties.
- *
- * @author USS_Shenzhou
- */
 public class SessionSample {
 
     private final String peer;

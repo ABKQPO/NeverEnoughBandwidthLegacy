@@ -11,28 +11,8 @@ import cn.ussshenzhou.notenoughbandwidth.codec.zstd.ZstdBlockCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.zstd.ZstdStreamCodec;
 import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 
-/**
- * The set of compression backends this installation can use, and the policy that picks one.
- * <p>
- * Backends are discovered through {@link PacketCodecFactory}, so adding one is a single
- * {@link #register} call and a new {@link PacketCodecType} constant - nothing else in the mod has
- * to change. {@link #preference()} is ordered best-first and is also what the capability handshake
- * walks when it intersects the two peers' abilities.
- *
- * @author USS_Shenzhou
- */
 public class PacketCodecRegistry {
 
-    /**
-     * Best first. A type missing from this list can still be decoded, it is just never chosen.
-     * <p>
-     * Note the order of the two fallbacks: the JDK deflate backend ranks above the one-frame-at-a-time
-     * zstd backend even though zstd is the better algorithm. What dominates this traffic is not how
-     * well a single frame compresses but whether the backend remembers the frames before it, because
-     * Minecraft repeats the same channel names, entity ids and NBT keys endlessly. A 32 KiB sliding
-     * window beats a stronger algorithm with no memory at all, and it needs no native library, so it
-     * is also the more portable of the two. {@code PacketCodecTest} holds this ordering to account.
-     */
     private static final PacketCodecType[] PREFERENCE = { PacketCodecType.ZSTD_STREAM, PacketCodecType.DEFLATE_STREAM,
         PacketCodecType.ZSTD_BLOCK, PacketCodecType.STORED };
 
@@ -40,9 +20,6 @@ public class PacketCodecRegistry {
 
     private static volatile boolean bootstrapped = false;
 
-    /**
-     * Installs the built-in backends. Idempotent, so it is safe to call from several entry points.
-     */
     public static synchronized void bootstrap() {
         if (bootstrapped) {
             return;
@@ -59,10 +36,6 @@ public class PacketCodecRegistry {
         FACTORIES.put(factory.type(), factory);
     }
 
-    /**
-     * @return the backend this side would like to use, honouring the config and falling back when
-     *         the requested one cannot run here
-     */
     public static PacketCodecType preferred() {
         bootstrap();
         String requested = NebConfig.codec;
@@ -112,9 +85,6 @@ public class PacketCodecRegistry {
         return factory == null ? "not registered" : factory.describe();
     }
 
-    /**
-     * @return a bit set of the wire ids this side can both produce and consume
-     */
     public static int capabilityMask() {
         bootstrap();
         int mask = 0;
@@ -126,17 +96,10 @@ public class PacketCodecRegistry {
         return mask;
     }
 
-    /**
-     * Intersects our abilities with a peer's capability mask and returns the best shared backend.
-     */
     public static PacketCodecType negotiate(int peerMask) {
         return negotiate(peerMask, true);
     }
 
-    /**
-     * @param allowStateful false to exclude the backends that keep a per-connection history, which
-     *                      is how a player is opted out of the memory that history costs
-     */
     public static PacketCodecType negotiate(int peerMask, boolean allowStateful) {
         for (PacketCodecType type : PREFERENCE) {
             if (!allowStateful && type.stateful()) {
@@ -166,7 +129,7 @@ public class PacketCodecRegistry {
             if (!isAvailable(type)) {
                 continue;
             }
-            if (builder.length() > 0) {
+            if (!builder.isEmpty()) {
                 builder.append(", ");
             }
             builder.append(type.configName())

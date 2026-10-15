@@ -8,11 +8,6 @@ import net.minecraft.client.gui.GuiScreen;
 
 import cpw.mods.fml.client.IModGuiFactory;
 
-/**
- * Hooks {@link NebGuiConfig} into the Forge mod list.
- *
- * @author USS_Shenzhou
- */
 public class NebGuiFactory implements IModGuiFactory {
 
     @Override

@@ -1,14 +1,5 @@
 package cn.ussshenzhou.notenoughbandwidth.codec;
 
-/**
- * Wire identifiers of the compression backends.
- * <p>
- * The id travels in the low nibble of every NEB frame header, so the values are part of the
- * protocol and must never be reused for something else. {@link #STORED} is special: it means the
- * frame carries no compression at all and therefore does not advance any codec state.
- *
- * @author USS_Shenzhou
- */
 public enum PacketCodecType {
 
     STORED(0, "stored", false),
@@ -44,9 +35,6 @@ public enum PacketCodecType {
         return configName;
     }
 
-    /**
-     * @return whether frames of this type depend on the frames that preceded them
-     */
     public boolean stateful() {
         return stateful;
     }

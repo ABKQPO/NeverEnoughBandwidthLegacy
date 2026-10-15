@@ -10,18 +10,9 @@ import cpw.mods.fml.common.SidedProxy;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
 
-/**
- * Mod entry point.
- * <p>
- * {@code acceptableRemoteVersions = "*"} is intentional and load bearing: the mod must not force
- * itself onto the other end of a connection. Compression is negotiated in band instead, so a
- * server running NEB stays joinable by clients without it and vice versa.
- *
- * @author USS_Shenzhou
- */
 @Mod(
-    modid = ModConstants.MOD_ID,
-    name = ModConstants.MOD_NAME,
+    modid = Tags.MODID,
+    name = Tags.MODNAME,
     version = Tags.VERSION,
     guiFactory = "cn.ussshenzhou.notenoughbandwidth.config.NebGuiFactory",
     acceptableRemoteVersions = "*",
