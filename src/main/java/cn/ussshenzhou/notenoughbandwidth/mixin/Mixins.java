@@ -13,6 +13,10 @@ public enum Mixins implements IMixins {
         .addCommonMixins("MixinNetworkManager")
         .setPhase(Phase.EARLY)
         .setApplyIf(() -> NebConfig.enabled)),
+    CHUNK_API_COMPAT(new MixinBuilder("Read ChunkAPI bulk chunk packets without replacing packet writers")
+        .addCommonMixins("MixinS26PacketMapChunkBulk")
+        .setPhase(Phase.EARLY)
+        .setApplyIf(() -> NebConfig.enabled)),
     DELAYED_CHUNK_CACHE(new MixinBuilder("Retain recently watched chunks without replacing vanilla chunk management")
         .addCommonMixins("MixinPlayerManager", "MixinPlayerInstance")
         .setPhase(Phase.EARLY)
