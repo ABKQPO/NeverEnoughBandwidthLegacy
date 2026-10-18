@@ -10,14 +10,21 @@ public class RemoteStats {
     private static volatile String codec = "";
     private static volatile List<PacketKindSample> outbound = Collections.emptyList();
     private static volatile List<PacketKindSample> inbound = Collections.emptyList();
+    private static volatile List<TrafficPoint> timeline = Collections.emptyList();
     private static volatile long receivedAt;
 
     public static void accept(TrafficSnapshot newSnapshot, String newCodec, List<PacketKindSample> newOutbound,
         List<PacketKindSample> newInbound) {
+        accept(newSnapshot, newCodec, newOutbound, newInbound, Collections.emptyList());
+    }
+
+    public static void accept(TrafficSnapshot newSnapshot, String newCodec, List<PacketKindSample> newOutbound,
+        List<PacketKindSample> newInbound, List<TrafficPoint> newTimeline) {
         snapshot = newSnapshot;
         codec = newCodec;
         outbound = Collections.unmodifiableList(new ArrayList<>(newOutbound));
         inbound = Collections.unmodifiableList(new ArrayList<>(newInbound));
+        timeline = Collections.unmodifiableList(new ArrayList<>(newTimeline));
         receivedAt = System.currentTimeMillis();
     }
 
@@ -26,6 +33,7 @@ public class RemoteStats {
         codec = "";
         outbound = Collections.emptyList();
         inbound = Collections.emptyList();
+        timeline = Collections.emptyList();
         receivedAt = 0L;
     }
 
@@ -51,6 +59,10 @@ public class RemoteStats {
 
     public static long receivedAt() {
         return receivedAt;
+    }
+
+    public static List<TrafficPoint> timeline() {
+        return timeline;
     }
 
     private RemoteStats() {}

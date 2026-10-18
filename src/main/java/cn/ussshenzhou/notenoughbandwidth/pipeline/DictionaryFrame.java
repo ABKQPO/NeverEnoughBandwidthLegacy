@@ -12,7 +12,21 @@ public class DictionaryFrame {
     public static final int HEADER = 0x90;
 
     public static boolean matches(ByteBuf frame) {
-        return frame.isReadable() && frame.getUnsignedByte(frame.readerIndex()) == HEADER;
+        if (!frame.isReadable() || frame.getUnsignedByte(frame.readerIndex()) != HEADER) {
+            return false;
+        }
+        ByteBuf view = frame.duplicate();
+        try {
+            view.skipBytes(1);
+            int version = NebVarInt.read(view);
+            int size = NebVarInt.read(view);
+            return version >= 0 && size >= 0
+                && size <= BandwidthDictionary.MAX_DICTIONARY_BYTES
+                && size == view.readableBytes()
+                && (version == 0) == (size == 0);
+        } catch (IndexOutOfBoundsException | CorruptedFrameException ignored) {
+            return false;
+        }
     }
 
     public static ByteBuf encode(ByteBufAllocator allocator, Snapshot dictionary) {

@@ -39,6 +39,13 @@ public class NebConfig {
     @Config.RangeInt(min = 4096, max = 8388608)
     public static int flushThresholdBytes = 262144;
 
+    @Config.Comment({ "CustomPayload channels that flush pending packets and bypass aggregation and compression.",
+        "Use this for handshake, registration, proxy, or mod control channels that require immediate vanilla delivery.",
+        "The NEB negotiation channel is handled before compression and does not need to be listed." })
+    @Config.DefaultStringList({ "FML|HS", "REGISTER", "UNREGISTER", "MC|Brand" })
+    @Config.RequiresMcRestart
+    public static String[] unaggregatedChannels = { "FML|HS", "REGISTER", "UNREGISTER", "MC|Brand" };
+
     @Config.Comment({ "Frames smaller than this are sent uncompressed; compressing them costs more than it saves." })
     @Config.DefaultInt(64)
     @Config.RangeInt(min = 0, max = 65536)
@@ -98,6 +105,16 @@ public class NebConfig {
         "Needed by '/neb report'; costs one map lookup per packet." })
     @Config.DefaultBoolean(true)
     public static boolean collectPacketProfile = true;
+
+    @Config.Comment("Default capture duration in seconds for /neb capture start.")
+    @Config.DefaultInt(120)
+    @Config.RangeInt(min = 1, max = 3600)
+    public static int datasetCaptureSeconds = 120;
+
+    @Config.Comment("Maximum captured payload size in MiB for one dataset.")
+    @Config.DefaultInt(64)
+    @Config.RangeInt(min = 1, max = 1024)
+    public static int datasetCaptureMiB = 64;
 
     @Config.Comment({ "Log every frame's compression ratio at debug level. Very noisy, for troubleshooting only." })
     @Config.DefaultBoolean(false)

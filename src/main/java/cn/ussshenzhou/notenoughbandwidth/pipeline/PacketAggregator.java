@@ -3,6 +3,7 @@ package cn.ussshenzhou.notenoughbandwidth.pipeline;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -12,6 +13,7 @@ import net.minecraft.network.Packet;
 import com.google.common.collect.BiMap;
 
 import cn.ussshenzhou.notenoughbandwidth.NebLog;
+import cn.ussshenzhou.notenoughbandwidth.capture.DatasetRecorder;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
 import cn.ussshenzhou.notenoughbandwidth.codec.zstd.BandwidthDictionary.Snapshot;
@@ -36,6 +38,9 @@ public class PacketAggregator extends ChannelDuplexHandler {
     private final PacketKindResolver resolver = new PacketKindResolver();
     private final ChannelIndex channelIndex = new ChannelIndex();
     private final CustomPayloadLookup payloadLookup = new CustomPayloadLookup();
+    private final PacketBypassPolicy bypassPolicy = new PacketBypassPolicy(
+        Arrays.asList(NebConfig.unaggregatedChannels),
+        payloadLookup);
     private final List<ChannelPromise> pending = new ArrayList<>();
 
     private ByteBuf accumulator;
@@ -69,6 +74,8 @@ public class PacketAggregator extends ChannelDuplexHandler {
                 // the part that happened to be compressible.
                 int size = passed.readableBytes() + NebVarInt.sizeOf(passed.readableBytes());
                 record(size, size, 1);
+                DatasetRecorder.global()
+                    .record(true, PacketCodecType.STORED, size, 1, size, passed);
             }
             ctx.write(message, promise);
             return;
@@ -78,6 +85,23 @@ public class PacketAggregator extends ChannelDuplexHandler {
             return;
         }
         try {
+            BiMap<Integer, Class<? extends Packet>> protocol = ctx.channel()
+                .attr(NetworkManager.attrKeySendable)
+                .get();
+            bypassPolicy.refresh(protocol);
+            int payloadId = payloadLookup.idOf(protocol);
+            if (bypassPolicy.shouldBypass(body, payloadId)) {
+                emit(ctx);
+                profile(ctx, body);
+                session.observeOutbound(body);
+                int wireSize = body.readableBytes() + NebVarInt.sizeOf(body.readableBytes());
+                DatasetRecorder.global()
+                    .record(true, PacketCodecType.STORED, wireSize, 1, wireSize, body);
+                ctx.write(body.retain(), promise);
+                record(wireSize, wireSize, 1);
+                ctx.flush();
+                return;
+            }
             profile(ctx, body);
             session.observeOutbound(body);
             int bodySize = body.readableBytes();
@@ -89,6 +113,8 @@ public class PacketAggregator extends ChannelDuplexHandler {
             if (entrySize > limit) {
                 // Preserve ordering while letting vanilla carry a large individual packet.
                 record(entrySize, entrySize, 1);
+                DatasetRecorder.global()
+                    .record(true, PacketCodecType.STORED, entrySize, 1, entrySize, body);
                 ctx.write(body.retain(), promise);
                 return;
             }
@@ -212,16 +238,19 @@ public class PacketAggregator extends ChannelDuplexHandler {
             ctx.close();
             return;
         }
-        release(indexed);
         if (frame == null) {
             // The peer never saw the definitions this attempt would have introduced.
             channelIndex.rollback(indexMark);
+            release(indexed);
             emitPlain(ctx, promises, rawSize, packets);
             return;
         }
-        releaseAccumulator();
 
         int wireSize = frame.readableBytes() + NebVarInt.sizeOf(frame.readableBytes());
+        DatasetRecorder.global()
+            .record(true, type, wireSize, packets, rawSize, indexed == null ? accumulator : indexed);
+        release(indexed);
+        releaseAccumulator();
         record(rawSize, wireSize, packets);
 
         ChannelFuture future = ctx.write(frame);
@@ -248,6 +277,14 @@ public class PacketAggregator extends ChannelDuplexHandler {
                 int bodySize = NebVarInt.read(raw);
                 ByteBuf body = raw.readSlice(bodySize)
                     .retain();
+                DatasetRecorder.global()
+                    .record(
+                        true,
+                        PacketCodecType.STORED,
+                        bodySize + NebVarInt.sizeOf(bodySize),
+                        1,
+                        bodySize + NebVarInt.sizeOf(bodySize),
+                        body);
                 if (index < promises.size()) {
                     ctx.write(body, promises.get(index));
                 } else {
@@ -275,6 +312,8 @@ public class PacketAggregator extends ChannelDuplexHandler {
             .recordOutbound(rawSize, wireSize, packets);
         NebStats.traffic()
             .recordOutbound(rawSize, wireSize, packets);
+        NebStats.timeline()
+            .recordOutbound(rawSize, wireSize);
         if (NebConfig.debugLog) {
             NebLog.debug(
                 "out {} packets, {} -> {} ({})",

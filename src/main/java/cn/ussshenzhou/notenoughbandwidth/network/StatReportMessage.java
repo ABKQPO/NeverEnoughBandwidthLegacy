@@ -6,6 +6,7 @@ import java.util.List;
 
 import cn.ussshenzhou.notenoughbandwidth.stat.PacketKindSample;
 import cn.ussshenzhou.notenoughbandwidth.stat.RemoteStats;
+import cn.ussshenzhou.notenoughbandwidth.stat.TrafficPoint;
 import cn.ussshenzhou.notenoughbandwidth.stat.TrafficSnapshot;
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
@@ -19,15 +20,22 @@ public class StatReportMessage implements IMessage {
     private String codec = "";
     private List<PacketKindSample> outbound = Collections.emptyList();
     private List<PacketKindSample> inbound = Collections.emptyList();
+    private List<TrafficPoint> timeline = Collections.emptyList();
 
     public StatReportMessage() {}
 
     public StatReportMessage(TrafficSnapshot snapshot, String codec, List<PacketKindSample> outbound,
         List<PacketKindSample> inbound) {
+        this(snapshot, codec, outbound, inbound, Collections.emptyList());
+    }
+
+    public StatReportMessage(TrafficSnapshot snapshot, String codec, List<PacketKindSample> outbound,
+        List<PacketKindSample> inbound, List<TrafficPoint> timeline) {
         this.snapshot = snapshot;
         this.codec = codec;
         this.outbound = new ArrayList<>(outbound);
         this.inbound = new ArrayList<>(inbound);
+        this.timeline = new ArrayList<>(timeline);
     }
 
     @Override
@@ -36,6 +44,7 @@ public class StatReportMessage implements IMessage {
         codec = ByteBufUtils.readUTF8String(buf);
         outbound = StatPayload.readKinds(buf);
         inbound = StatPayload.readKinds(buf);
+        timeline = StatPayload.readTimeline(buf);
     }
 
     @Override
@@ -44,6 +53,7 @@ public class StatReportMessage implements IMessage {
         ByteBufUtils.writeUTF8String(buf, codec);
         StatPayload.writeKinds(buf, outbound);
         StatPayload.writeKinds(buf, inbound);
+        StatPayload.writeTimeline(buf, timeline);
     }
 
     public TrafficSnapshot snapshot() {
@@ -62,11 +72,16 @@ public class StatReportMessage implements IMessage {
         return inbound;
     }
 
+    public List<TrafficPoint> timeline() {
+        return timeline;
+    }
+
     public static class Handler implements IMessageHandler<StatReportMessage, IMessage> {
 
         @Override
         public IMessage onMessage(StatReportMessage message, MessageContext ctx) {
-            RemoteStats.accept(message.snapshot(), message.codec(), message.outbound(), message.inbound());
+            RemoteStats
+                .accept(message.snapshot(), message.codec(), message.outbound(), message.inbound(), message.timeline());
             return null;
         }
     }

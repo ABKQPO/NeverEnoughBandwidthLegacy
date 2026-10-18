@@ -10,7 +10,7 @@ import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 public enum Mixins implements IMixins {
 
     NETWORK_PIPELINE(new MixinBuilder("Install the aggregating and compressing pipeline handlers")
-        .addCommonMixins("MixinNetworkManager")
+        .addCommonMixins("MixinNetworkManager", "MixinNetworkDispatcher")
         .setPhase(Phase.EARLY)
         .setApplyIf(() -> NebConfig.enabled)),
     CHUNK_API_COMPAT(new MixinBuilder("Read ChunkAPI bulk chunk packets without replacing packet writers")

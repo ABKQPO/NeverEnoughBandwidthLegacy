@@ -9,6 +9,7 @@ import net.minecraft.network.Packet;
 import com.google.common.collect.BiMap;
 
 import cn.ussshenzhou.notenoughbandwidth.NebLog;
+import cn.ussshenzhou.notenoughbandwidth.capture.DatasetRecorder;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecRegistry;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
@@ -38,18 +39,29 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf frame, List<Object> out) {
         int wireSize = frame.readableBytes() + NebVarInt.sizeOf(frame.readableBytes());
+        if (!session.negotiated()) {
+            record(wireSize, wireSize, 1);
+            DatasetRecorder.global()
+                .record(false, PacketCodecType.STORED, wireSize, 1, wireSize, frame);
+            out.add(frame.retain());
+            return;
+        }
         if (DictionaryFrame.matches(frame)) {
             session.installInboundDictionary(DictionaryFrame.decode(frame));
             record(0, wireSize, 0);
             return;
         }
-        if (!NebFrame.isNebFrame(frame)) {
-            // Counted too, so the reported ratio covers the whole stream and stays comparable with
-            // the outbound figure.
-            record(wireSize, wireSize, 1);
-            out.add(frame.retain());
+        if (NebFrame.isNebFrame(frame)) {
+            expandNebFrame(ctx, frame, wireSize, out);
             return;
         }
+        record(wireSize, wireSize, 1);
+        DatasetRecorder.global()
+            .record(false, PacketCodecType.STORED, wireSize, 1, wireSize, frame);
+        out.add(frame.retain());
+    }
+
+    private void expandNebFrame(ChannelHandlerContext ctx, ByteBuf frame, int wireSize, List<Object> out) {
         int header = frame.readUnsignedByte();
         PacketCodecType codecType = NebFrame.codecOf(header);
         if (codecType == null) {
@@ -61,18 +73,27 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
             if (rawSize <= 0 || rawSize > NebConfig.maxExpandedFrameBytes) {
                 throw new CorruptedFrameException("NEB: invalid expanded frame size " + rawSize);
             }
-            validatePackets(raw);
-            record(rawSize, wireSize, split(ctx, raw, out));
+            int packets = validatePackets(raw);
+            ByteBuf sample = raw.duplicate();
+            SplitResult split = split(ctx, raw, out);
+            if (split.packets != packets) {
+                throw new CorruptedFrameException("NEB: packet count changed while expanding a frame");
+            }
+            DatasetRecorder.global()
+                .record(false, codecType, wireSize, split.packets, checkedRawBytes(split.rawBytes), sample);
+            record(split.rawBytes, wireSize, split.packets);
         } finally {
             raw.release();
         }
     }
 
-    private void record(int rawSize, int wireSize, int packets) {
+    private void record(long rawSize, long wireSize, int packets) {
         session.stats()
             .recordInbound(rawSize, wireSize, packets);
         NebStats.traffic()
             .recordInbound(rawSize, wireSize, packets);
+        NebStats.timeline()
+            .recordInbound(rawSize, wireSize);
         if (NebConfig.debugLog) {
             NebLog.debug(
                 "in  {} packets, {} <- {} ({})",
@@ -126,13 +147,14 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
         return direct;
     }
 
-    private int split(ChannelHandlerContext ctx, ByteBuf raw, List<Object> out) {
+    private SplitResult split(ChannelHandlerContext ctx, ByteBuf raw, List<Object> out) {
         BiMap<Integer, Class<? extends Packet>> receivable = ctx.channel()
             .attr(NetworkManager.attrKeyReceivable)
             .get();
         BiMap<Integer, Class<? extends Packet>> protocol = NebConfig.collectPacketProfile ? receivable : null;
         int payloadId = payloadLookup.idOf(receivable);
         int packets = 0;
+        long rawBytes = 0;
         while (raw.isReadable()) {
             int bodySize = NebVarInt.read(raw);
             if (bodySize <= 0 || bodySize > raw.readableBytes()) {
@@ -145,6 +167,11 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
             ByteBuf body = raw.readSlice(bodySize);
             ByteBuf restored = payloadId == CustomPayloadLookup.UNRESOLVED ? null
                 : channelIndex.decode(ctx.alloc(), body, payloadId);
+            int restoredSize = restored == null ? bodySize : restored.readableBytes();
+            rawBytes = safeAdd(rawBytes, restoredSize + (long) NebVarInt.sizeOf(restoredSize));
+            if (rawBytes > Integer.MAX_VALUE) {
+                throw new CorruptedFrameException("NEB: expanded packet data is too large");
+            }
             // Profiled after the channel name is back, so the report names the mod rather than a token.
             if (protocol != null) {
                 NebStats.inboundProfile()
@@ -155,17 +182,43 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
             out.add(restored == null ? body.retain() : restored);
             packets++;
         }
-        return packets;
+        return new SplitResult(rawBytes, packets);
     }
 
-    private void validatePackets(ByteBuf raw) {
+    private static int checkedRawBytes(long rawBytes) {
+        if (rawBytes <= 0 || rawBytes > Integer.MAX_VALUE) {
+            throw new CorruptedFrameException("NEB: expanded packet data is too large");
+        }
+        return (int) rawBytes;
+    }
+
+    private static long safeAdd(long left, long right) {
+        return Long.MAX_VALUE - left < right ? Long.MAX_VALUE : left + right;
+    }
+
+    private int validatePackets(ByteBuf raw) {
         ByteBuf view = raw.duplicate();
+        int packets = 0;
         while (view.isReadable()) {
             int size = NebVarInt.read(view);
             if (size <= 0 || size > view.readableBytes()) {
                 throw new CorruptedFrameException("NEB: invalid sub packet size " + size);
             }
             view.skipBytes(size);
+            packets++;
+        }
+        return packets;
+    }
+
+    private static class SplitResult {
+
+        private final long rawBytes;
+        private final int packets;
+
+        private SplitResult(long rawBytes, int packets) {
+            this.rawBytes = rawBytes;
+            this.packets = packets;
         }
     }
+
 }

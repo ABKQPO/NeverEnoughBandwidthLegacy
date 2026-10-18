@@ -14,8 +14,8 @@ import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 
 public class PacketCodecRegistry {
 
-    private static final PacketCodecType[] PREFERENCE = { PacketCodecType.ZSTD_STREAM, PacketCodecType.DEFLATE_STREAM,
-        PacketCodecType.ZSTD_BLOCK, PacketCodecType.STORED };
+    private static final PacketCodecType[] PREFERENCE = { PacketCodecType.ZSTD_STREAM, PacketCodecType.ZSTD_BLOCK,
+        PacketCodecType.DEFLATE_STREAM, PacketCodecType.STORED };
 
     private static final Map<PacketCodecType, PacketCodecFactory> FACTORIES = new EnumMap<>(PacketCodecType.class);
 

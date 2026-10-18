@@ -71,7 +71,7 @@ public abstract class MixinPlayerInstance implements ChunkWatch {
 
     @Override
     public boolean neb$isSent(EntityPlayerMP player) {
-        return loaded && playersWatchingChunk.contains(player) && !player.loadedChunks.contains(chunkLocation);
+        return loaded && playersWatchingChunk.contains(player) && player.loadedChunks.contains(chunkLocation);
     }
 
     @Override

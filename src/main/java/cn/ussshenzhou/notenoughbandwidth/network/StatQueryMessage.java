@@ -34,7 +34,9 @@ public class StatQueryMessage implements IMessage {
                         .snapshot()),
                 StatPayload.trim(
                     NebStats.inboundProfile()
-                        .snapshot()));
+                        .snapshot()),
+                NebStats.timeline()
+                    .snapshot());
         }
     }
 }

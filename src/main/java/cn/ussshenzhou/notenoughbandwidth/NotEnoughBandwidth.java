@@ -1,5 +1,6 @@
 package cn.ussshenzhou.notenoughbandwidth;
 
+import cn.ussshenzhou.notenoughbandwidth.capture.DatasetRecorder;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecRegistry;
 import cn.ussshenzhou.notenoughbandwidth.codec.zstd.BandwidthDictionary;
 import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
@@ -53,6 +54,8 @@ public class NotEnoughBandwidth {
 
     @Mod.EventHandler
     public void serverStopped(FMLServerStoppedEvent event) {
+        DatasetRecorder.global()
+            .stop();
         BandwidthDictionary.reset();
     }
 }

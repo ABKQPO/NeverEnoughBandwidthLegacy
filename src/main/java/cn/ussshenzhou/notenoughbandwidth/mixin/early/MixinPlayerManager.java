@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit;
 
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.server.management.PlayerManager;
+import net.minecraft.util.MathHelper;
 import net.minecraft.world.ChunkCoordIntPair;
 import net.minecraft.world.WorldServer;
 
@@ -63,8 +64,8 @@ public abstract class MixinPlayerManager implements ChunkCacheController {
             pos.chunkXPos,
             pos.chunkZPos,
             watch,
-            (int) player.posX >> 4,
-            (int) player.posZ >> 4,
+            MathHelper.floor_double(player.posX) >> 4,
+            MathHelper.floor_double(player.posZ) >> 4,
             playerViewRadius + NebConfig.delayedChunkCacheDistance,
             NebConfig.delayedChunkCacheSize,
             System.nanoTime(),
@@ -114,8 +115,8 @@ public abstract class MixinPlayerManager implements ChunkCacheController {
             EntityPlayerMP player = entry.getKey();
             DelayedChunkCache<ChunkWatch> cache = entry.getValue();
             cache.expire(
-                (int) player.posX >> 4,
-                (int) player.posZ >> 4,
+                MathHelper.floor_double(player.posX) >> 4,
+                MathHelper.floor_double(player.posZ) >> 4,
                 playerViewRadius + NebConfig.delayedChunkCacheDistance,
                 NebConfig.delayedChunkCache ? NebConfig.delayedChunkCacheSize : 0,
                 now,

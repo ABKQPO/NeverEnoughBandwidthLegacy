@@ -18,7 +18,8 @@ public class NebFrame {
     }
 
     public static boolean isNebFrame(ByteBuf buf) {
-        return buf.isReadable() && (buf.getUnsignedByte(buf.readerIndex()) & MARKER) != 0;
+        return buf.isReadable() && (buf.getUnsignedByte(buf.readerIndex()) & ~CODEC_MASK) == MARKER
+            && codecOf(buf.getUnsignedByte(buf.readerIndex())) != null;
     }
 
     public static PacketCodecType codecOf(int header) {

@@ -24,6 +24,7 @@ public class NebSession {
     private final Map<PacketCodecType, PacketCodec> inboundCodecs = new EnumMap<>(PacketCodecType.class);
 
     private volatile boolean outboundEnabled;
+    private volatile boolean negotiated;
     private volatile PacketCodecType outboundType = PacketCodecType.STORED;
     private volatile String peerLabel;
     private volatile int peerProtocolVersion = -1;
@@ -65,6 +66,10 @@ public class NebSession {
 
     public boolean outboundEnabled() {
         return outboundEnabled;
+    }
+
+    public boolean negotiated() {
+        return negotiated;
     }
 
     public PacketCodecType outboundType() {
@@ -131,6 +136,7 @@ public class NebSession {
         if (outboundEnabled && outboundType == type) {
             return;
         }
+        negotiated = true;
         channel.eventLoop()
             .execute(() -> {
                 if (released || !channel.isActive() || (outboundEnabled && outboundType == type)) {
@@ -175,6 +181,7 @@ public class NebSession {
         }
         inboundCodecs.clear();
         outboundEnabled = false;
+        negotiated = false;
         outboundDictionary = BandwidthDictionary.EMPTY;
         inboundDictionary = BandwidthDictionary.EMPTY;
     }
