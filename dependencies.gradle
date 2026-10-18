@@ -1,3 +1,7 @@
+configurations {
+    devClientMods
+}
+
 dependencies {
 
     api("com.github.GTNewHorizons:GTNHLib:0.11.52:dev")
@@ -7,8 +11,8 @@ dependencies {
 
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:Hodgepodge:2.7.215:dev")
     runtimeOnlyNonPublishable("com.falsepattern:chunkapi-mc1.7.10:0.8.1:dev")
-    // runtimeOnlyNonPublishable(rfg.deobf("maven.modrinth:archaicfix:0.8.0"))
-    // runtimeOnlyNonPublishable("com.github.GTNewHorizons:Angelica:2.2.28:dev")
+    runtimeOnlyNonPublishable(rfg.deobf("maven.modrinth:archaicfix:0.8.0"))
+    devClientMods("com.github.GTNewHorizons:Angelica:2.2.28:dev")
 
     // jvmDowngrader
     compileOnly("javax.xml.bind:jaxb-api:2.3.1")

@@ -29,3 +29,10 @@ runConfigs.forEach { (taskName, path) ->
         }
     }
 }
+
+val devClientMods = configurations.named("devClientMods")
+listOf("runClient", "runClient17", "runClient21", "runClient25").forEach { taskName ->
+    tasks.named<JavaExec>(taskName) {
+        classpath(devClientMods)
+    }
+}
