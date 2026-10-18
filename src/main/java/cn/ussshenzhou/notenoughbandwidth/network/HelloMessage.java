@@ -96,29 +96,36 @@ public class HelloMessage implements IMessage {
                 return null;
             }
             session.configurePeer(serverSide, message.capabilityMask());
+            boolean firstServerHello = false;
             if (!serverSide && session.markClientHelloSent()) {
+                firstServerHello = true;
                 PacketCodecType proposal = message.selectedCodec();
                 if (proposal == null || !PacketCodecRegistry.isAvailable(proposal)
                     || (message.capabilityMask() & 1 << proposal.wireId()) == 0) {
-                    proposal = PacketCodecType.STORED;
+                    proposal = PacketCodecRegistry.negotiate(message.capabilityMask());
                 }
                 NebNetwork.sendHello(manager, "client", proposal);
             }
             session.peerLabel(serverSide ? NebNetwork.playerNameOf(ctx) : "server");
-            if (!serverSide && message.selectedCodec() == null) {
+            if (!serverSide && firstServerHello) {
                 return null;
             }
             boolean allowStateful = !serverSide || !NebNetwork.deniesContext(ctx);
             PacketCodecType agreed;
             if (serverSide) {
                 PacketCodecType proposal = message.selectedCodec();
-                if (proposal != null && (allowStateful || !proposal.stateful())
-                    && PacketCodecRegistry.isAvailable(proposal)
-                    && (message.capabilityMask() & 1 << proposal.wireId()) != 0) {
-                    agreed = proposal;
-                } else {
-                    agreed = PacketCodecRegistry.negotiate(message.capabilityMask(), allowStateful);
+                if (!session.serverSelectionMatches(proposal)) {
+                    if (session
+                        .markServerSelection(PacketCodecRegistry.negotiate(message.capabilityMask(), allowStateful))) {
+                        agreed = session.serverSelection();
+                        NebNetwork.sendHello(manager, "server", agreed);
+                        session.enableOutbound(agreed, message.protocolVersion());
+                        return null;
+                    }
+                    NebLog.warn("The client sent an unexpected NEB codec confirmation; staying uncompressed.");
+                    return null;
                 }
+                agreed = proposal;
             } else {
                 // The server decides for both directions. A client that cannot honour the choice
                 // falls back to sending nothing compressed rather than picking for itself, because
@@ -132,8 +139,8 @@ public class HelloMessage implements IMessage {
                     agreed = PacketCodecType.STORED;
                 }
             }
-            if (serverSide) {
-                NebNetwork.sendHello(manager, "server", agreed);
+            if (!serverSide) {
+                NebNetwork.sendHello(manager, "client", agreed);
             }
             session.enableOutbound(agreed, message.protocolVersion());
             return null;

@@ -32,19 +32,23 @@ public class StatPayload {
     }
 
     public static TrafficSnapshot readSnapshot(ByteBuf buf) {
-        return new TrafficSnapshot(
-            buf.readLong(),
-            buf.readLong(),
-            buf.readLong(),
-            buf.readLong(),
-            buf.readLong(),
-            buf.readLong(),
-            buf.readLong(),
-            buf.readLong(),
-            buf.readDouble(),
-            buf.readDouble(),
-            buf.readDouble(),
-            buf.readDouble());
+        try {
+            return new TrafficSnapshot(
+                buf.readLong(),
+                buf.readLong(),
+                buf.readLong(),
+                buf.readLong(),
+                buf.readLong(),
+                buf.readLong(),
+                buf.readLong(),
+                buf.readLong(),
+                buf.readDouble(),
+                buf.readDouble(),
+                buf.readDouble(),
+                buf.readDouble());
+        } catch (IllegalArgumentException invalid) {
+            throw new CorruptedFrameException("NEB: invalid traffic snapshot", invalid);
+        }
     }
 
     public static void writeKinds(ByteBuf buf, List<PacketKindSample> samples) {
@@ -59,7 +63,10 @@ public class StatPayload {
     }
 
     public static List<PacketKindSample> readKinds(ByteBuf buf) {
-        int count = Math.min(MAX_KINDS, ByteBufUtils.readVarInt(buf, 2));
+        int count = ByteBufUtils.readVarInt(buf, 2);
+        if (count < 0 || count > MAX_KINDS) {
+            throw new CorruptedFrameException("NEB: invalid packet profile length " + count);
+        }
         List<PacketKindSample> samples = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             samples.add(new PacketKindSample(ByteBufUtils.readUTF8String(buf), buf.readLong(), buf.readLong()));

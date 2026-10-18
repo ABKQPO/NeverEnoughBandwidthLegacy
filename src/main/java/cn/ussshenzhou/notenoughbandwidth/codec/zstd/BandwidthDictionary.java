@@ -19,10 +19,10 @@ public class BandwidthDictionary {
     public static final int MAX_SAMPLE_BYTES = 16 * 1024;
     public static final Snapshot EMPTY = new Snapshot(0, new byte[0]);
 
-    private static final int MIN_SAMPLES = 32;
-    private static final int MIN_SAMPLE_BYTES = 128 * 1024;
-    private static final int MAX_SAMPLES = 128;
-    private static final int MAX_BUFFERED_BYTES = 512 * 1024;
+    private static final int MIN_SAMPLES = 64;
+    private static final int MIN_SAMPLE_BYTES = 64 * 1024;
+    private static final int MAX_SAMPLES = 512;
+    private static final int MAX_BUFFERED_BYTES = 1024 * 1024;
     private static final long RETRAIN_NANOS = TimeUnit.SECONDS.toNanos(60);
     private static final Object LOCK = new Object();
     private static final ExecutorService TRAINER = Executors.newSingleThreadExecutor(task -> {

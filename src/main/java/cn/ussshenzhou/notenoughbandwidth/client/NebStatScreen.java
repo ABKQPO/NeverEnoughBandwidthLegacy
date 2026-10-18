@@ -10,6 +10,8 @@ import net.minecraft.client.resources.I18n;
 
 import org.lwjgl.opengl.GL11;
 
+import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecRegistry;
+import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 import cn.ussshenzhou.notenoughbandwidth.network.NebNetwork;
 import cn.ussshenzhou.notenoughbandwidth.session.NebSession;
 import cn.ussshenzhou.notenoughbandwidth.session.NebSessionRegistry;
@@ -85,11 +87,11 @@ public class NebStatScreen extends GuiScreen {
         drawCenteredString(fontRendererObj, I18n.format("neb.stat.title"), width / 2, 12, 0xFFFFFF);
         int chartX = Math.max(width / 2, 220);
         int textWidth = chartX - 24;
-        drawSection("neb.stat.client", local, 34, textWidth);
+        drawSection("neb.stat.client", local, 34, textWidth, localCodec(session()));
         int top = 112;
         if (RemoteStats.present()) {
-            drawSection("neb.stat.server", remote, top, textWidth);
-            drawLine(I18n.format("neb.stat.updated", formatAge(RemoteStats.receivedAt())), top + 62, textWidth);
+            drawSection("neb.stat.server", remote, top, textWidth, RemoteStats.codec());
+            drawLine(I18n.format("neb.stat.updated", formatAge(RemoteStats.receivedAt())), top + 76, textWidth);
         } else {
             drawLine(I18n.format("neb.stat.server"), top, textWidth);
             drawLine(I18n.format(requested ? "neb.stat.waiting" : "neb.stat.unavailable"), top + 14, textWidth);
@@ -116,7 +118,7 @@ public class NebStatScreen extends GuiScreen {
         super.drawScreen(mouseX, mouseY, partialTicks);
     }
 
-    private void drawSection(String title, TrafficSnapshot snapshot, int y, int maxWidth) {
+    private void drawSection(String title, TrafficSnapshot snapshot, int y, int maxWidth, String codec) {
         drawLine(I18n.format(title), y, maxWidth);
         drawDirection(
             "neb.stat.inbound",
@@ -134,6 +136,9 @@ public class NebStatScreen extends GuiScreen {
             snapshot.outboundWireRate(),
             y + 38,
             maxWidth);
+        if (codec != null && !codec.isEmpty()) {
+            drawLine(I18n.format("neb.stat.codec", codec), y + 62, maxWidth);
+        }
     }
 
     private void drawDirection(String direction, long raw, long wire, double rawRate, double wireRate, int y,
@@ -220,6 +225,31 @@ public class NebStatScreen extends GuiScreen {
             NebNetwork.queryServer();
             requested = true;
         }
+    }
+
+    private NebSession session() {
+        return mc.getNetHandler() == null ? null
+            : NebSessionRegistry.of(
+                mc.getNetHandler()
+                    .getNetworkManager());
+    }
+
+    private static String localCodec(NebSession session) {
+        if (session == null || !session.outboundEnabled()) {
+            return I18n.format("neb.stat.unnegotiated");
+        }
+        String dictionary = session.outboundDictionaryVersion() == 0 ? ""
+            : " | dictionary v" + session.outboundDictionaryVersion()
+                + " ("
+                + session.outboundDictionarySize()
+                + " bytes)";
+        return session.outboundType()
+            .configName() + " | "
+            + PacketCodecRegistry.describe(session.outboundType())
+            + " | aggregation "
+            + NebConfig.aggregationWindowMillis
+            + " ms"
+            + dictionary;
     }
 
     private String pollLabel() {

@@ -33,8 +33,10 @@ public class NebSession {
     private volatile boolean dictionaryCapable;
     private boolean released;
     private boolean clientHelloSent;
-    private Snapshot outboundDictionary = BandwidthDictionary.EMPTY;
-    private Snapshot inboundDictionary = BandwidthDictionary.EMPTY;
+    private boolean serverSelectionSent;
+    private PacketCodecType serverSelection = PacketCodecType.STORED;
+    private volatile Snapshot outboundDictionary = BandwidthDictionary.EMPTY;
+    private volatile Snapshot inboundDictionary = BandwidthDictionary.EMPTY;
     private long dictionaryTraffic;
 
     public NebSession(Channel channel) {
@@ -76,6 +78,14 @@ public class NebSession {
         return outboundType;
     }
 
+    public int outboundDictionaryVersion() {
+        return outboundDictionary.version();
+    }
+
+    public int outboundDictionarySize() {
+        return outboundDictionary.size();
+    }
+
     public void configurePeer(boolean server, int capabilityMask) {
         this.server = server;
         this.dictionaryCapable = (capabilityMask & ModConstants.DICTIONARY_CAPABILITY) != 0;
@@ -87,6 +97,23 @@ public class NebSession {
         }
         clientHelloSent = true;
         return true;
+    }
+
+    public boolean markServerSelection(PacketCodecType type) {
+        if (serverSelectionSent || type == null) {
+            return false;
+        }
+        serverSelectionSent = true;
+        serverSelection = type;
+        return true;
+    }
+
+    public boolean serverSelectionMatches(PacketCodecType type) {
+        return serverSelectionSent && serverSelection == type;
+    }
+
+    public PacketCodecType serverSelection() {
+        return serverSelection;
     }
 
     public void observeOutbound(ByteBuf body) {
@@ -182,6 +209,9 @@ public class NebSession {
         inboundCodecs.clear();
         outboundEnabled = false;
         negotiated = false;
+        clientHelloSent = false;
+        serverSelectionSent = false;
+        serverSelection = PacketCodecType.STORED;
         outboundDictionary = BandwidthDictionary.EMPTY;
         inboundDictionary = BandwidthDictionary.EMPTY;
     }

@@ -10,6 +10,12 @@ public class TrafficPoint {
 
     public TrafficPoint(long timestampMillis, long inboundRawBytes, long inboundWireBytes, long outboundRawBytes,
         long outboundWireBytes) {
+        if (timestampMillis < 0 || inboundRawBytes < 0
+            || inboundWireBytes < 0
+            || outboundRawBytes < 0
+            || outboundWireBytes < 0) {
+            throw new IllegalArgumentException("Traffic point values cannot be negative");
+        }
         this.timestampMillis = timestampMillis;
         this.inboundRawBytes = inboundRawBytes;
         this.inboundWireBytes = inboundWireBytes;

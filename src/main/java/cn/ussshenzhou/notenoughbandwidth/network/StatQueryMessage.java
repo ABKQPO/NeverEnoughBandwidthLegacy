@@ -3,6 +3,10 @@ package cn.ussshenzhou.notenoughbandwidth.network;
 import net.minecraft.entity.player.EntityPlayerMP;
 
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecRegistry;
+import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
+import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
+import cn.ussshenzhou.notenoughbandwidth.session.NebSession;
+import cn.ussshenzhou.notenoughbandwidth.session.NebSessionRegistry;
 import cn.ussshenzhou.notenoughbandwidth.stat.NebStats;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
 import cpw.mods.fml.common.network.simpleimpl.IMessageHandler;
@@ -25,10 +29,21 @@ public class StatQueryMessage implements IMessage {
             if (player == null || !NebNetwork.isOperator(player)) {
                 return null;
             }
+            NebSession session = NebSessionRegistry.of(NebNetwork.managerOf(ctx));
+            PacketCodecType codec = session == null ? PacketCodecRegistry.preferred() : session.outboundType();
+            String dictionary = session == null || session.outboundDictionaryVersion() == 0 ? ""
+                : " | dictionary v" + session.outboundDictionaryVersion()
+                    + " ("
+                    + session.outboundDictionarySize()
+                    + " bytes)";
             return new StatReportMessage(
                 NebStats.snapshot(),
-                PacketCodecRegistry.preferred()
-                    .configName(),
+                codec.configName() + " | "
+                    + PacketCodecRegistry.describe(codec)
+                    + " | aggregation "
+                    + NebConfig.aggregationWindowMillis
+                    + " ms"
+                    + dictionary,
                 StatPayload.trim(
                     NebStats.outboundProfile()
                         .snapshot()),

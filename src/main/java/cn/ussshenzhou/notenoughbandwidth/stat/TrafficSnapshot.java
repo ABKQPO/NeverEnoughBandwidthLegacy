@@ -20,6 +20,23 @@ public class TrafficSnapshot {
     public TrafficSnapshot(long outboundRawBytes, long outboundWireBytes, long outboundFrames, long outboundPackets,
         long inboundRawBytes, long inboundWireBytes, long inboundFrames, long inboundPackets, double outboundRawRate,
         double outboundWireRate, double inboundRawRate, double inboundWireRate) {
+        if (outboundRawBytes < 0 || outboundWireBytes < 0
+            || outboundFrames < 0
+            || outboundPackets < 0
+            || inboundRawBytes < 0
+            || inboundWireBytes < 0
+            || inboundFrames < 0
+            || inboundPackets < 0
+            || !Double.isFinite(outboundRawRate)
+            || outboundRawRate < 0.0D
+            || !Double.isFinite(outboundWireRate)
+            || outboundWireRate < 0.0D
+            || !Double.isFinite(inboundRawRate)
+            || inboundRawRate < 0.0D
+            || !Double.isFinite(inboundWireRate)
+            || inboundWireRate < 0.0D) {
+            throw new IllegalArgumentException("Traffic snapshot values are invalid");
+        }
         this.outboundRawBytes = outboundRawBytes;
         this.outboundWireBytes = outboundWireBytes;
         this.outboundFrames = outboundFrames;
@@ -52,18 +69,27 @@ public class TrafficSnapshot {
 
     public TrafficSnapshot plus(TrafficSnapshot other) {
         return new TrafficSnapshot(
-            outboundRawBytes + other.outboundRawBytes,
-            outboundWireBytes + other.outboundWireBytes,
-            outboundFrames + other.outboundFrames,
-            outboundPackets + other.outboundPackets,
-            inboundRawBytes + other.inboundRawBytes,
-            inboundWireBytes + other.inboundWireBytes,
-            inboundFrames + other.inboundFrames,
-            inboundPackets + other.inboundPackets,
-            outboundRawRate + other.outboundRawRate,
-            outboundWireRate + other.outboundWireRate,
-            inboundRawRate + other.inboundRawRate,
-            inboundWireRate + other.inboundWireRate);
+            safeAdd(outboundRawBytes, other.outboundRawBytes),
+            safeAdd(outboundWireBytes, other.outboundWireBytes),
+            safeAdd(outboundFrames, other.outboundFrames),
+            safeAdd(outboundPackets, other.outboundPackets),
+            safeAdd(inboundRawBytes, other.inboundRawBytes),
+            safeAdd(inboundWireBytes, other.inboundWireBytes),
+            safeAdd(inboundFrames, other.inboundFrames),
+            safeAdd(inboundPackets, other.inboundPackets),
+            safeRateAdd(outboundRawRate, other.outboundRawRate),
+            safeRateAdd(outboundWireRate, other.outboundWireRate),
+            safeRateAdd(inboundRawRate, other.inboundRawRate),
+            safeRateAdd(inboundWireRate, other.inboundWireRate));
+    }
+
+    private static long safeAdd(long left, long right) {
+        return Long.MAX_VALUE - left < right ? Long.MAX_VALUE : left + right;
+    }
+
+    private static double safeRateAdd(double left, double right) {
+        double result = left + right;
+        return Double.isFinite(result) ? result : Double.MAX_VALUE;
     }
 
     public long outboundRawBytes() {

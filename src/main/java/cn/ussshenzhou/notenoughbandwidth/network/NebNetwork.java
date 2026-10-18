@@ -7,7 +7,6 @@ import net.minecraft.server.MinecraftServer;
 import cn.ussshenzhou.notenoughbandwidth.ModConstants;
 import cn.ussshenzhou.notenoughbandwidth.NebLog;
 import cn.ussshenzhou.notenoughbandwidth.NotEnoughBandwidth;
-import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecRegistry;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
 import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 import cpw.mods.fml.common.network.NetworkRegistry;
@@ -54,7 +53,9 @@ public class NebNetwork {
     }
 
     public static void greet(NetworkManager manager) {
-        sendHello(manager, "server", PacketCodecRegistry.preferred());
+        // The first hello only advertises capabilities. The selected backend is sent after the
+        // client's reply, so neither side can switch frame formats before the peer is ready.
+        sendHello(manager, "server");
     }
 
     public static void queryServer() {

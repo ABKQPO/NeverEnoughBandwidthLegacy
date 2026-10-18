@@ -53,6 +53,9 @@ public class DatasetRecorder {
         if (directory == null || side == null || side.isEmpty()) {
             throw new IllegalArgumentException("Dataset directory and side are required");
         }
+        if (!isSafeSide(side)) {
+            throw new IllegalArgumentException("Dataset side may contain only letters, digits, '.', '-' or '_'");
+        }
         if (side.getBytes(StandardCharsets.UTF_8).length > 256) {
             throw new IllegalArgumentException("Dataset side label is too long");
         }
@@ -260,6 +263,16 @@ public class DatasetRecorder {
         byte[] payload = record.copyPayload();
         output.writeInt(payload.length);
         output.write(payload);
+    }
+
+    private static boolean isSafeSide(String side) {
+        for (int i = 0; i < side.length(); i++) {
+            char character = side.charAt(i);
+            if (!(Character.isLetterOrDigit(character) || character == '.' || character == '-' || character == '_')) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private enum CaptureState {

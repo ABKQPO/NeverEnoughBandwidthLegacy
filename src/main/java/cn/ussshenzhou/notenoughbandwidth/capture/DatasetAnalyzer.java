@@ -50,6 +50,9 @@ public class DatasetAnalyzer {
                 throw new IOException("Unsupported NEB dataset version " + version);
             }
             long timestamp = input.readLong();
+            if (timestamp < 0) {
+                throw new IOException("Invalid NEB dataset start timestamp");
+            }
             int sideLength = input.readUnsignedShort();
             if (sideLength > MAX_SIDE_BYTES) {
                 throw new IOException("NEB dataset side label is too long");
