@@ -1,183 +1,177 @@
-# 网络包优化 | Not Enough Bandwidth (NEB)
+# NeverEnoughBandwidthLegacy
 
-如果您有意愿帮助我们将NEB进行反向移植，请在提交任何PR之前到[Discord](https://discord.gg/ZAn7U2BJpb)与 USS_Shenzhou 讨论。
+English | [简体中文](README_zh_CN.md)
 
-![icon](src/main/resources/icon-chn_500.png)
-
-## 简介 | Introduction
-
-NEB通过多种方式来尽可能地节省Minecraft游玩过程中产生的流量，并对模组和玩家保持透明。
-
-在[TeaCon 甲辰](https://teacon.cn)的土球数据集中，相比未压缩的原始数据，NEB理论上可以将服务器的出站流量减少到原来的7.6%。作为对比，原版默认压缩机制的出站流量是原始数据大小的39%。
-
-NEB uses various methods to save as much network traffic as possible during Minecraft gameplay, while remaining transparent to both mods and players.
-
-In the ZZZZ Dataset from [TeaCon Jiachen](https://teacon.cn), compared to raw uncompressed data, NEB can theoretically reduce the server's outbound traffic to 7.6% of its original size. For comparison, the outbound traffic of Vanilla's default compression mechanism is 39% of the original data size.
-
-<img width="1908" height="1908" alt="output" src="https://github.com/user-attachments/assets/5e015031-f6e8-4280-a280-17da859a8615" />
-
-在原版环境下的测试中，服务器出站流量被减少到原来的18%。理论上，随着安装的模组数量的增加，网络传输的内容会更多更复杂，压缩效果会更好。
-
-In tests conducted in a Vanilla environment, the server outbound traffic was reduced to 18% of its original size. Theoretically, as the number of installed mods increases, the content transmitted over the network becomes larger and more complex, leading to better compression performance.
-
-在游戏中按下Alt+N来简单地查看流量情况。
-
-Press Alt+N in-game to easily view the network traffic status.
-
-<img width="2559" height="1383" alt="image" src="https://github.com/user-attachments/assets/216dea71-dbc7-40f2-8117-d20fcf74cd11" />
-
-## 主要功能 | Main Features
-
-### 紧凑的包头 | Compact Packet Header
-
-优化`CustomPacketPayload`编码及对应解码，以紧凑的索引替代包头的`Identifier`(Packet Type)，使模组网络包包头消耗在绝大多数情况下仅为2字节（最多4字节），而不是网络包类型对应的字符串长度。
-
-Optimize `CustomPacketPayload` encoding and decoding by replacing the packet header `Identifier` (Packet Type) with a compact index. In the vast majority of cases this reduces the mod network packet header overhead to just 2 bytes (at most 4 bytes), instead of the length of the string corresponding to the network packet type.
-
-索引结构如下：
-
-The index structure is as follows:
+A network optimization mod for Minecraft 1.7.10, designed to improve multiplayer gameplay on bandwidth-limited servers.
 
 > [!NOTE]
-> 自26.1.2-0起，包头不再使用1字节的功能位标志。解码时直接尝试将数据解析为已注册的合法`Identifier`，以此判断该包是否被索引。
+> This is a 1.7.10 port of NEB ([NotEnoughBandwidth](https://github.com/USS-Shenzhou/NotEnoughBandwidth)). Please report issues with this port to this repository, rather than to NEB.
+
+## Download
+
+| GTNH Version | Mod Version | Status                 | Download                                                                                                                                |
+|--------------|-------------|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| 2.9.0 RC2    | 1.0.0+      | ✅ Actively Maintained | [![Latest](https://img.shields.io/badge/Download-Latest-success)](https://github.com/ABKQPO/NeverEnoughBandwidthLegacy/releases/latest) |
+
+## Traffic statistics screen
+
+Default shortcut: `Alt+N`
+
+![Traffic statistics screen](assets/stat_screen_en.png)
+
+## Features
+
+### ZSTD Streaming Compression
+
+`ZstdStreamCodec` retains a Zstandard compression context per connection, reusing history across aggregate frames to compress subsequent traffic using previously transmitted data. The server can also use `BandwidthDictionary` to train compression dictionaries from each connection's traffic, adopting them only when validation shows savings that justify their transfer cost.
+
+The client and server exchange capabilities through `HelloMessage`, while `NebSession` manages the negotiation result and connection contexts. Available backends include ZSTD streaming, independent ZSTD blocks, Deflate streaming, and vanilla packet passthrough. Traffic stays on the vanilla path until negotiation completes. Independent blocks and streams that have not warmed up can fall back to original packets when compression provides no savings; stream context resets are synchronized with the receiver.
+
+### Smaller Packet Headers
+
+NEB compresses the `Identifier` type headers at the shared `CustomPacketPayload` codec entry point. In 1.7.10, mod payloads are carried by `S3FPacketCustomPayload` (server to client) and `C17PacketCustomPayload` (client to server). This port identifies channel names in their serialized bytes and replaces repeated names with compact indices, preserving message IDs and data inside the payload.
+
+Forge 1.7.10 lacks modern NeoForge's unified registry of payload types and codecs, so `ChannelIndex` learns a dictionary dynamically for each direction of each connection: the first occurrence defines the channel name, and subsequent packets reference it with a 1–2 byte VarInt inside compressed aggregate frames. Matching registration orders are not required.
+
+This 1–2 byte figure covers only the channel name replacement, not the entire packet header. Each dictionary holds up to 4096 channels; new channels beyond that limit retain their full names. The receiver restores channel names before vanilla/Forge decoding, so other mods do not need to change their networking code.
+
+### Packet Aggregation
+
+Combines small packets sent within a short interval and compresses them together to share compression overhead. The default aggregation window is 20 milliseconds; streaming codecs may hold very small batches longer to improve compression efficiency.
+
+Lifecycle hooks in `NetworkManager` and Forge's `NetworkDispatcher` install the pipeline. `PacketAggregator` collects packet bodies already encoded by vanilla's `MessageSerializer` and writes them into aggregate `NebFrame` frames. On receipt, `PacketExpander` runs after the `MessageDeserializer2` frame splitter, decompresses the data, restores channel names, and returns individual packet bodies to the vanilla packet decoder.
+
+> [!NOTE]
+> A regular compressed aggregate frame has the following structure; the second layout shows the subpackets before compression:
 >
-> Since 26.1.2-0 there is no longer a 1-byte function-flags header. Decoding determines whether the packet is indexed by attempting to parse the data as a registered, valid `Identifier`.
+> ```text
+> +---+---+---+-------------------------------------+
+> | S | H | R |          compressed data            |
+> +---+---+---+-------------------------------------+
 >
-> ### Indexed packet type
-> - If not indexed:
+>             +----+----+----+----+----+----+-----+
+>             | s0 | p0 | d0 | s1 | p1 | d1 | ... |
+>             +----+----+----+----+----+----+-----+
+>             |-- packet 0 --|-- packet 1 --|
 > ```
-> ┌------------- N bytes ----------------
-> │  Identifier (packet type) in UTF-8
-> └--------------------------------------
-> ```
-> - If indexed:
-> ```
-> ┌---------- X bytes ---------┬---------- Y bytes ---------┐
-> │   namespace-id (var int)   │     path-id (var int)      │
-> └----------------------------┴----------------------------┘
-> ```
-> Then packet data.
-
-`namespace-id`与`path-id`各使用VarInt编码（每个1\~2字节）。最多支持4096个模组，每个模组4096条通道；典型场景下两个VarInt合计2字节。
-
-`namespace-id` and `path-id` are each VarInt-encoded (1\~2 bytes each). This supports up to 4096 mods with 4096 channels per mod; in typical scenarios the two VarInts together occupy 2 bytes.
-
-### 聚合与压缩 | Aggregation and Compress
-
-优化原版经常出现大量小体积网络包的情况，在`Connection`层面拦截发送，每隔20ms组装为一个大网络包，并进行压缩后发送。
-
-Optimize the situation where vanilla often produces a large number of small network packets. Intercept transmission at the `Connection` level, assemble them into one large network packet every 20ms, and send it after compression.
-
-> [!NOTE]
-> ```
-> ┌---┬----┬----┬----┬----┬----┬----...
-> │ S │ p0 │ s0 │ d0 │ p1 │ s1 │ d1 ...
-> └---┴----┴----┴----┴----┴----┴----...
->     └--packet 1---┘└--packet 2---┘
->     └----------compressed----------┘
-> ```
-> - S = varint, size of compressed buf
-> - p = prefix (medium/int/utf-8)， type of this subpacket
-> - s = varint, size of this subpacket
-> - d = bytes, data of this subpacket
-
-### 延迟区块缓存 | Delayed Chunk Cache
-
-在原版，当玩家移动时，服务端会指示客户端立即忘记身后的区块；如果又回到原来的位置，就需要发送区块的全量信息。通过延后这个“忘记”，可以节省在机器上跳来跳去时产生的区块发送流量。
-
-In Vanilla, when a player moves, the server instructs the client to immediately forget the chunks behind them; if the player returns to the original position, the full chunk data must be sent again. By delaying this "forgetting", the chunk transmission traffic generated when poking around can be saved.
-
-## 配置 | Config
-
-在`config/NotEnoughBandwidthConfig.json`修改配置文件。
-
-Modify the configuration file at `config/NotEnoughBandwidthConfig.json`.
-
-### compatibleMode
-
-> [!NOTE]
-> **此选项在客户端和服务端独立生效。**
 >
-> WORK INDEPENDENTLY ON CLIENT AND SERVER.
-
-是否要开启兼容模式。如果为true，下方的`blackList`会被启用。
-
-Whether to enable compatibility mode. If set to `true`, the `blackList` below will be used.
-
-### blackList
-
-> [!NOTE]
-> **此选项在客户端和服务端独立生效。**
+> - `S`: VarInt, outer frame length, excluding `S` itself.
+> - `H`: 1 byte, containing the NEB marker, compression backend, and context reset flag.
+> - `R`: VarInt, aggregate data size before compression, after channel indexing has been applied.
+> - `s`: VarInt, total byte length of this subpacket's `p + d`.
+> - `p`: Vanilla packet ID (VarInt); custom payloads also include the channel token and, for definitions or unindexed channels, the channel name.
+> - `d`: Remaining data for this subpacket.
 >
-> WORK INDEPENDENTLY ON CLIENT AND SERVER.
+> The entire `s0 + p0 + d0 + s1 + p1 + d1 + ...` sequence is compressed into `compressed data`.
 
-兼容模式黑名单。在黑名单中的包会被NEB跳过。默认自带一系列和velocity相关的包，你也可以按需增加新的包。
+Channels and packet types requiring immediate delivery can bypass aggregation; buffered packets are sent first to preserve ordering. Oversized individual packets follow the vanilla path, and aggregate frames reach downstream handlers only after packet lengths and channel indices have been validated.
 
-The blacklist for compatibility mode. Packets listed here will be skipped by NEB. By default, it includes a list of Velocity-related packets, but you can add new packets as needed.
+### Delayed Chunk Cache
 
-> [!WARNING]
-> 为确保包的顺序性，黑名单中的包会打断正在进行的聚合。如果黑名单中有许多的包，或者对应包发送过于频繁，则聚合-压缩的效率会降低。
-> 
-> To ensure packet ordering, packets in the blacklist will interrupt the ongoing aggregation. If there are many packets in the blacklist, or if the corresponding packets are sent too frequently, the efficiency of aggregation-compression will decrease.
+Temporarily retains chunks that have just left a player's view to reduce full chunk retransmissions when moving back and forth nearby. By default, each player can retain up to 128 additional chunks, within 2 chunks beyond the view distance, for up to 10 seconds.
 
-### contextLevel
+The cache retains and restores chunks through subscription hooks in `PlayerManager` and its inner class `PlayerInstance`. Retained chunks continue receiving block updates, while `isPlayerWatchingChunk` excludes the extra retained chunks to avoid extending normal entity tracking. Time, distance, and capacity limits, or player departure, trigger cleanup through the vanilla removal path without replacing chunk writers.
+
+## Commands
+
+| Command                      | Usage                 |
+|------------------------------|-----------------------|
+| View server statistics       | `/neb stat`           |
+| Export a server report       | `/neb report`         |
+| Reset server statistics      | `/neb reset`          |
+| View available codecs        | `/neb codec`          |
+| Check dataset capture status | `/neb capture status` |
+| Start capture                | `/neb capture start`  |
+| Stop capture                 | `/neb capture stop`   |
+
+## Configuration
+
+The configuration file is `config/notenoughbandwidth.cfg`. On the client, a configuration screen is also available from the mod list.
+
+Values below are defaults. The client and server each read their local configuration; the server selects a compression backend supported by both peers. Chunk caching and per-player context settings are used on the server. After editing the file, restart the relevant client or server so negotiation, codecs, and bypass rules are initialized with the new settings.
+
+### enabled
+
+Defaults to `true`. Controls whether the optimization pipeline is enabled. Changing this option requires a client/server restart.
+
+### codec
+
+Defaults to `auto`, which is recommended. The selected backend must be supported by both peers.
+
+| Value            | Description                                                                       |
+|------------------|-----------------------------------------------------------------------------------|
+| `auto`           | Selects a backend based on the runtime and peer capabilities.                     |
+| `zstd_stream`    | Reuses ZSTD compression history across frames.                                    |
+| `zstd_block`     | Compresses each frame independently, without cross-frame history.                 |
+| `deflate_stream` | Uses the JDK's Deflate stream without requiring the ZSTD native library.          |
+| `stored`         | Passes through vanilla packets without aggregate compression or channel indexing. |
+
+### aggregationWindowMillis, smallPacketCoalescingMillis
+
+Controls aggregation and small-packet waiting times, in milliseconds.
+
+| Option                        | Default | Description                                                                                                                                   |
+|-------------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `aggregationWindowMillis`     | `20`    | Normal aggregation window, from 0 to 200; 0 only merges packets processed consecutively by the EventLoop without deliberately adding a delay. |
+| `smallPacketCoalescingMillis` | `80`    | Allows very small batches using streaming compression to wait up to this time limit, from 0 to 500; 0 disables this extended wait.            |
+
+Longer waits can improve small-packet compression at the cost of latency.
+
+### flushThresholdBytes, compressionThresholdBytes, maxExpandedFrameBytes
+
+| Option                      | Default             | Description                                                                                                           |
+|-----------------------------|---------------------|-----------------------------------------------------------------------------------------------------------------------|
+| `flushThresholdBytes`       | `262144` (256 KiB)  | Sends buffered data early once this size is reached; aggregate data also has a hard limit of 1 MiB.                   |
+| `compressionThresholdBytes` | `64`                | Independent frames below this size are not compressed; streaming codecs may attempt smaller batches after coalescing. |
+| `maxExpandedFrameBytes`     | `16777216` (16 MiB) | Limits the decompressed/restored size of received frames and also bounds outbound aggregation size.                   |
+
+### unaggregatedChannels, unaggregatedPacketTypes
+
+Specifies channel names and packet class names that stay on the vanilla path, bypassing aggregation and compression. The default channels are `FML|HS`, `REGISTER`, `UNREGISTER`, and `MC|Brand`. Packet types accept fully qualified or simple class names; defaults include selected latency-sensitive entity, movement, and chat packets.
 
 > [!NOTE]
-> **此选项在客户端和服务端独立生效。**
->
-> WORK INDEPENDENTLY ON CLIENT AND SERVER.
+> Bypassed packets trigger a send of buffered data first to preserve ordering. Numerous or frequent bypasses reduce aggregation efficiency. Changing either list requires a restart.
 
-在进行压缩时的上下文窗口长度。可选范围为21\~25的整数，分别代表2\~32MB。默认为23，即8MB。
+### zstdLevel, zstdWindowLog
 
-上下文窗口长度越长，则压缩效果越好，越节省流量；但也会消耗更多的内存。
+| Option          | Default | Description                                                                                             |
+|-----------------|---------|---------------------------------------------------------------------------------------------------------|
+| `zstdLevel`     | `3`     | ZSTD compression level, from 1 to 19; higher levels generally save more bandwidth at a higher CPU cost. |
+| `zstdWindowLog` | `22`    | Base-2 logarithm of the ZSTD streaming history window, from 17 to 27; 22 corresponds to a 4 MiB window. |
 
-The context window size used for compression. Valid values are integers from 21 to 25, representing 2MB to 32MB respectively. The default is 23 (8MB).
+Larger windows increase native memory usage per connection. Both compression and decompression contexts require memory; the window size is not the connection's total memory usage.
 
-A larger context window results in better compression and bandwidth savings, but consumes more memory.
+### enableBandwidthDictionary
 
-> [!TIP]
-> 对于100名玩家的服务器，设置为25会产生约额外3200MB的内存占用。
-> 
-> For a server with 100 players, a setting of 25 will result in approximately 3200MB of additional memory usage.
+Defaults to `true`. Allows the server to sample traffic and train size-limited ZSTD dictionaries per connection. Updates are sent only when both peers support them, validation shows savings, and distribution conditions are met; dictionaries are not sent unconditionally to every connection.
 
-### dccSizeLimit, dccDistance, dccTimeout
+### delayedChunkCache, delayedChunkCacheSize, delayedChunkCacheDistance, delayedChunkCacheSeconds
 
 > [!NOTE]
-> **这些选项仅在服务端生效。**
-> 
-> ONLY WORK ON SERVER.
+> These chunk cache settings are used on the server.
 
-延迟区块缓存（DCC）允许的最大缓存区块数量、缓存区块距离、缓存过期时间。较大的值可能会占用更多内存，较小的值可能会更频繁地触发更新。
+| Option                      | Default | Description                                                                                          |
+|-----------------------------|---------|------------------------------------------------------------------------------------------------------|
+| `delayedChunkCache`         | `true`  | Enables the delayed chunk cache; changing this requires a restart.                                   |
+| `delayedChunkCacheSize`     | `128`   | Maximum additional retained chunks per player, from 0 to 2048; 0 disables retention.                 |
+| `delayedChunkCacheDistance` | `2`     | Additional retention distance beyond the view radius, in chunks, from 0 to 16; 0 disables retention. |
+| `delayedChunkCacheSeconds`  | `10`    | Maximum retention time after a chunk leaves view, from 1 to 120 seconds.                             |
 
-The maximum number of cached chunks, cached chunk distance, and cache timeout allowed by the Delayed Chunk Cache (DCC). Larger values may consume more memory, while smaller values may trigger updates more frequently.
+Larger distances, capacities, and retention times can reduce retransmissions when revisiting areas, at the cost of additional server and client resources.
 
-### playersDoNotUseContext
+### playersWithoutContext
 
-> [!NOTE]
-> **此选项仅在服务端生效。**
->
-> ONLY WORK ON SERVER.
+A server setting, empty by default. Accepts player names or UUIDs, matched case-insensitively. Listed players negotiate a backend without cross-frame compression history to reduce context memory usage, potentially lowering compression efficiency.
 
-指定一个特殊的UUID名单，在这个名单中的玩家不启用Zstd上下文复用。适用于Replay等依赖网络包重放的mod。
+### collectPacketProfile, datasetCaptureSeconds, datasetCaptureMiB, debugLog
 
-Assign a special UUID list, server will not reuse ZSTD context for these players. Designed for mods such as Replay, which relies on packet re-play.
+| Option                  | Default | Description                                                                             |
+|-------------------------|---------|-----------------------------------------------------------------------------------------|
+| `collectPacketProfile`  | `true`  | Records statistics by packet type and mod channel for detailed reports.                 |
+| `datasetCaptureSeconds` | `120`   | Default dataset capture duration, from 1 to 3600 seconds.                               |
+| `datasetCaptureMiB`     | `64`    | Maximum captured payload size per dataset, from 1 to 1024 MiB.                          |
+| `debugLog`              | `false` | Logs per-frame compression ratios at debug level; recommended only for troubleshooting. |
 
-## 版权和许可 | Copyrights and Licenses
+## Credit
 
-Copyright (C) 2025 USS_Shenzhou
-
-本模组是自由软件，你可以再分发之和/或依照由自由软件基金会发布的 GNU 通用公共许可证修改之，无论是版本 3 许可证，还是（按你的决定）任何以后版都可以。
-
-发布这个模组是希望它能有用，但是并无保障；甚至连可销售和符合某个特定的目的都不保证。请参看 GNU 通用公共许可证，了解详情。
-
-Copyright (C) 2025 USS_Shenzhou
-
-This mod is free software; you can redistribute it and/or modify them under the terms of the GNU General Public License as published by the Free Software Foundation; either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
-
-### 额外许可 | Additional Permissions
-
-a）当你作为游戏玩家，加载本程序于Minecraft并游玩时，本许可证自动地授予你一切为正常加载本程序于Minecraft并游玩所必要的、不在GPL-3.0许可证内容中、或是GPL-3.0许可证所不允许的权利。如果GPL-3.0许可证内容与Minecraft EULA或其他Mojang/微软条款产生冲突，以后者为准。
-
-a) As a game player, when you load and play this program in Minecraft, this license automatically grants you all rights necessary, which are not covered in the GPL-3.0 license, or are prohibited by the GPL-3.0 license, for the normal loading and playing of this program in Minecraft. In case of conflicts between the GPL-3.0 license and the Minecraft EULA or other Mojang/Microsoft terms, the latter shall prevail.
+Thanks to USS_Shenzhou and the contributors to the original [NotEnoughBandwidth](https://github.com/USS-Shenzhou/NotEnoughBandwidth) for the foundation and ideas behind this project's packet optimizations.
