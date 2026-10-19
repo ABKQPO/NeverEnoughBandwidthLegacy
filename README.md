@@ -21,10 +21,56 @@ Default shortcut: `Alt+N`
 
 ## Features
 
-- **ZSTD streaming compression**: Reuses compression history across packets to reduce the bandwidth consumed by repeated data.
-- **Smaller headers**: Replaces repeated channel names with compact channel indices to reduce mod packet header overhead.
-- **Packet aggregation**: Combines small packets sent within a short interval and compresses them together to reduce per-packet overhead.
-- **Chunk caching**: Temporarily retains recently visited chunks to reduce full chunk retransmissions when players return to nearby areas.
+### ZSTD Streaming Compression
+
+`ZstdStreamCodec` retains a Zstandard compression context per connection, reusing history across aggregate frames to compress subsequent traffic using previously transmitted data. The server can also use `BandwidthDictionary` to train compression dictionaries from each connection's traffic, adopting them only when validation shows savings that justify their transfer cost.
+
+The client and server exchange capabilities through `HelloMessage`, while `NebSession` manages the negotiation result and connection contexts. Available backends include ZSTD streaming, independent ZSTD blocks, Deflate streaming, and vanilla packet passthrough. Traffic stays on the vanilla path until negotiation completes. Independent blocks and streams that have not warmed up can fall back to original packets when compression provides no savings; stream context resets are synchronized with the receiver.
+
+### Smaller Packet Headers
+
+NEB compresses the `Identifier` type headers at the shared `CustomPacketPayload` codec entry point. In 1.7.10, mod payloads are carried by `S3FPacketCustomPayload` (server to client) and `C17PacketCustomPayload` (client to server). This port identifies channel names in their serialized bytes and replaces repeated names with compact indices, preserving message IDs and data inside the payload.
+
+Forge 1.7.10 lacks modern NeoForge's unified registry of payload types and codecs, so `ChannelIndex` learns a dictionary dynamically for each direction of each connection: the first occurrence defines the channel name, and subsequent packets reference it with a 1–2 byte VarInt inside compressed aggregate frames. Matching registration orders are not required.
+
+This 1–2 byte figure covers only the channel name replacement, not the entire packet header. Each dictionary holds up to 4096 channels; new channels beyond that limit retain their full names. The receiver restores channel names before vanilla/Forge decoding, so other mods do not need to change their networking code.
+
+### Packet Aggregation
+
+Combines small packets sent within a short interval and compresses them together to share compression overhead. The default aggregation window is 20 milliseconds; streaming codecs may hold very small batches longer to improve compression efficiency.
+
+Lifecycle hooks in `NetworkManager` and Forge's `NetworkDispatcher` install the pipeline. `PacketAggregator` collects packet bodies already encoded by vanilla's `MessageSerializer` and writes them into aggregate `NebFrame` frames. On receipt, `PacketExpander` runs after the `MessageDeserializer2` frame splitter, decompresses the data, restores channel names, and returns individual packet bodies to the vanilla packet decoder.
+
+> [!NOTE]
+> A regular compressed aggregate frame has the following structure; the second layout shows the subpackets before compression:
+>
+> ```text
+> +---+---+---+-------------------------------------+
+> | S | H | R |          compressed data            |
+> +---+---+---+-------------------------------------+
+>
+>             +----+----+----+----+----+----+-----+
+>             | s0 | p0 | d0 | s1 | p1 | d1 | ... |
+>             +----+----+----+----+----+----+-----+
+>             |-- packet 0 --|-- packet 1 --|
+> ```
+>
+> - `S`: VarInt, outer frame length, excluding `S` itself.
+> - `H`: 1 byte, containing the NEB marker, compression backend, and context reset flag.
+> - `R`: VarInt, aggregate data size before compression, after channel indexing has been applied.
+> - `s`: VarInt, total byte length of this subpacket's `p + d`.
+> - `p`: Vanilla packet ID (VarInt); custom payloads also include the channel token and, for definitions or unindexed channels, the channel name.
+> - `d`: Remaining data for this subpacket.
+>
+> The entire `s0 + p0 + d0 + s1 + p1 + d1 + ...` sequence is compressed into `compressed data`.
+
+Channels and packet types requiring immediate delivery can bypass aggregation; buffered packets are sent first to preserve ordering. Oversized individual packets follow the vanilla path, and aggregate frames reach downstream handlers only after packet lengths and channel indices have been validated.
+
+### Delayed Chunk Cache
+
+Temporarily retains chunks that have just left a player's view to reduce full chunk retransmissions when moving back and forth nearby. By default, each player can retain up to 128 additional chunks, within 2 chunks beyond the view distance, for up to 10 seconds.
+
+The cache retains and restores chunks through subscription hooks in `PlayerManager` and its inner class `PlayerInstance`. Retained chunks continue receiving block updates, while `isPlayerWatchingChunk` excludes the extra retained chunks to avoid extending normal entity tracking. Time, distance, and capacity limits, or player departure, trigger cleanup through the vanilla removal path without replacing chunk writers.
 
 ## Commands
 
@@ -33,44 +79,99 @@ Default shortcut: `Alt+N`
 | View server statistics       | `/neb stat`           |
 | Export a server report       | `/neb report`         |
 | Reset server statistics      | `/neb reset`          |
+| View available codecs        | `/neb codec`          |
 | Check dataset capture status | `/neb capture status` |
 | Start capture                | `/neb capture start`  |
 | Stop capture                 | `/neb capture stop`   |
 
----
+## Configuration
 
-## Technical Differences from NEB
+The configuration file is `config/notenoughbandwidth.cfg`. On the client, a configuration screen is also available from the mod list.
 
-This port reimplements channel indexing, aggregate frames, and connection negotiation for the Forge 1.7.10 network stack. The main technical differences are described below.
+Values below are defaults. The client and server each read their local configuration; the server selects a compression backend supported by both peers. Chunk caching and per-player context settings are used on the server. After editing the file, restart the relevant client or server so negotiation, codecs, and bypass rules are initialized with the new settings.
 
-### Pipeline Integration Without a Unified Payload Registry
+### enabled
 
-NEB filters and sorts the negotiated NeoForge PLAY channel list and payload registrations to build a two-level `namespace-id + path-id` index, then modifies the shared `CustomPacketPayload` codec entry point. Forge 1.7.10 provides channel registration, but lacks an equivalent unified registry covering mod payload types and codecs, so this implementation cannot be ported directly.
+Defaults to `true`. Controls whether the optimization pipeline is enabled. Changing this option requires a client/server restart.
 
-This port installs Netty handlers through lifecycle Mixins in `NetworkManager` and Forge's `NetworkDispatcher`: `PacketAggregator` is placed before `MessageSerializer`, and `PacketExpander` after the frame splitter, `MessageDeserializer2`. Since Netty processes outbound events in reverse pipeline order, the aggregator receives bytes already produced by the vanilla encoder, while the receiving side restores those bytes before vanilla packet decoding. Pipeline anchors are located by both name and type; installation and retries run on the connection's EventLoop, and local channels are skipped.
+### codec
 
-### Header Compression with Connection-Local Channel Dictionaries
+Defaults to `auto`, which is recommended. The selected backend must be supported by both peers.
 
-This port locates the packet IDs of `S3FPacketCustomPayload` and `C17PacketCustomPayload` in the connection's current outbound and inbound protocol tables, then identifies channel names in serialized packet bodies. Each index represents a complete channel string; message IDs and data inside the mod's payload remain unchanged. Each direction of each connection maintains its own dictionary and assigns IDs in order of first appearance, so both peers do not need matching registration orders:
+| Value            | Description                                                                       |
+|------------------|-----------------------------------------------------------------------------------|
+| `auto`           | Selects a backend based on the runtime and peer capabilities.                     |
+| `zstd_stream`    | Reuses ZSTD compression history across frames.                                    |
+| `zstd_block`     | Compresses each frame independently, without cross-frame history.                 |
+| `deflate_stream` | Uses the JDK's Deflate stream without requiring the ZSTD native library.          |
+| `stored`         | Passes through vanilla packets without aggregate compression or channel indexing. |
 
-- First occurrence: Sends the VarInt token `(id << 1) | 1`, followed by the UTF-8 byte length and channel name, allowing the receiver to define the index.
-- Subsequent references: Sends only the VarInt token `id << 1`. Tokens for IDs 1–63 occupy 1 byte; all other assigned IDs occupy 2 bytes. This covers only the channel name replacement, excluding the vanilla packet ID and frame header.
-- Each dictionary holds up to 4096 channels. Once full, new channels use token `0` followed by the complete name, while existing channels can still use indices. Packets that bypass aggregation retain their vanilla format.
+### aggregationWindowMillis, smallPacketCoalescingMillis
 
-These substitutions apply only within compressed aggregate frames. The receiver checks definition order, index bounds, and name lengths, then restores the vanilla channel name and passes the packet back to the vanilla/Forge decoding path. Other mods do not need to change their serialization code. If a compression attempt falls back to sending the original packets, newly allocated indices are rolled back to avoid referencing definitions the peer never received. Dictionaries are cleared when the connection ends. Channel indices and Zstandard compression dictionaries are separate mechanisms.
+Controls aggregation and small-packet waiting times, in milliseconds.
 
-### Aggregation Boundaries and Packet Ordering
+| Option                        | Default | Description                                                                                                                                   |
+|-------------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `aggregationWindowMillis`     | `20`    | Normal aggregation window, from 0 to 200; 0 only merges packets processed consecutively by the EventLoop without deliberately adding a delay. |
+| `smallPacketCoalescingMillis` | `80`    | Allows very small batches using streaming compression to wait up to this time limit, from 0 to 500; 0 disables this extended wait.            |
 
-NEB collects packet objects at `Connection.send` and uses their types and codecs to encode a custom aggregate payload. This port collects bytes after packet encoding, groups them into consecutive `VarInt length + vanilla packet body` entries, and adds frame metadata such as the codec, context reset flag, and decompressed length. After decompression and channel name restoration, the receiver passes individual packet bodies to the vanilla decoder.
+Longer waits can improve small-packet compression at the cost of latency.
 
-Each connection's EventLoop manages its aggregation buffer and scheduled sends. Buffered data is sent before bypassed packets, oversized packets, or connection closure to preserve ordering. Frame sizes are constrained by both Minecraft's outer frame length limit and the configured decompressed size limit; individual packets exceeding the aggregation limit use the vanilla path. The receiver validates packet lengths and passes data downstream only after every packet has been split and every channel index restored successfully. Parsing failures release temporary buffers and raise an exception.
+### flushThresholdBytes, compressionThresholdBytes, maxExpandedFrameBytes
 
-### Compression Backends and Context Synchronization
+| Option                      | Default             | Description                                                                                                           |
+|-----------------------------|---------------------|-----------------------------------------------------------------------------------------------------------------------|
+| `flushThresholdBytes`       | `262144` (256 KiB)  | Sends buffered data early once this size is reached; aggregate data also has a hard limit of 1 MiB.                   |
+| `compressionThresholdBytes` | `64`                | Independent frames below this size are not compressed; streaming codecs may attempt smaller batches after coalescing. |
+| `maxExpandedFrameBytes`     | `16777216` (16 MiB) | Limits the decompressed/restored size of received frames and also bounds outbound aggregation size.                   |
 
-NEB uses Zstandard contexts and allows context reuse to be disabled per player. This port abstracts compression behind codecs and uses `HelloMessage` to exchange protocol versions, capabilities, and the server's selection, which is enabled after client confirmation. Available paths include Zstandard streaming, independent Zstandard blocks, Deflate streaming, and vanilla packet passthrough. Selection depends on both peers' available capabilities and configuration; packets continue along the vanilla path until negotiation completes.
+### unaggregatedChannels, unaggregatedPacketTypes
 
-For independent blocks or streams that have not warmed up, packets may be sent in their original form if compression provides no savings. If a streaming compressor has already consumed that batch, the sender recreates its context and marks the next compressed frame with a reset flag to synchronize the receiver. Warm streams may retain slightly larger frames to preserve history for subsequent compression. The server can also train shared Zstandard dictionaries from traffic samples; when both peers support them and distribution conditions are met, it sends a dictionary update frame before encoding subsequent data with the new dictionary.
+Specifies channel names and packet class names that stay on the vanilla path, bypassing aggregation and compression. The default channels are `FML|HS`, `REGISTER`, `UNREGISTER`, and `MC|Brand`. Packet types accept fully qualified or simple class names; defaults include selected latency-sensitive entity, movement, and chat packets.
 
-### Delayed Chunk Cache Integration
+> [!NOTE]
+> Bypassed packets trigger a send of buffered data first to preserve ordering. Numerous or frequent bypasses reduce aggregation efficiency. Changing either list requires a restart.
 
-NEB overwrites the tracking view update logic in `ChunkMap`. This port instead adds retention and restoration hooks to the 1.7.10 `PlayerManager` and `PlayerInstance`: when a player moves, subscriptions to already-sent chunks are temporarily retained; returning reuses existing chunks and refreshes entity tracking. Timeout, distance, capacity limits, or player departure trigger cleanup through the vanilla removal path. Retained chunks are excluded from `isPlayerWatchingChunk` results so the extra retained area is not treated as part of the normal entity tracking range. A separate Mixin handles ChunkAPI-compatible bulk chunk reads without replacing chunk writers.
+### zstdLevel, zstdWindowLog
+
+| Option          | Default | Description                                                                                             |
+|-----------------|---------|---------------------------------------------------------------------------------------------------------|
+| `zstdLevel`     | `3`     | ZSTD compression level, from 1 to 19; higher levels generally save more bandwidth at a higher CPU cost. |
+| `zstdWindowLog` | `22`    | Base-2 logarithm of the ZSTD streaming history window, from 17 to 27; 22 corresponds to a 4 MiB window. |
+
+Larger windows increase native memory usage per connection. Both compression and decompression contexts require memory; the window size is not the connection's total memory usage.
+
+### enableBandwidthDictionary
+
+Defaults to `true`. Allows the server to sample traffic and train size-limited ZSTD dictionaries per connection. Updates are sent only when both peers support them, validation shows savings, and distribution conditions are met; dictionaries are not sent unconditionally to every connection.
+
+### delayedChunkCache, delayedChunkCacheSize, delayedChunkCacheDistance, delayedChunkCacheSeconds
+
+> [!NOTE]
+> These chunk cache settings are used on the server.
+
+| Option                      | Default | Description                                                                                          |
+|-----------------------------|---------|------------------------------------------------------------------------------------------------------|
+| `delayedChunkCache`         | `true`  | Enables the delayed chunk cache; changing this requires a restart.                                   |
+| `delayedChunkCacheSize`     | `128`   | Maximum additional retained chunks per player, from 0 to 2048; 0 disables retention.                 |
+| `delayedChunkCacheDistance` | `2`     | Additional retention distance beyond the view radius, in chunks, from 0 to 16; 0 disables retention. |
+| `delayedChunkCacheSeconds`  | `10`    | Maximum retention time after a chunk leaves view, from 1 to 120 seconds.                             |
+
+Larger distances, capacities, and retention times can reduce retransmissions when revisiting areas, at the cost of additional server and client resources.
+
+### playersWithoutContext
+
+A server setting, empty by default. Accepts player names or UUIDs, matched case-insensitively. Listed players negotiate a backend without cross-frame compression history to reduce context memory usage, potentially lowering compression efficiency.
+
+### collectPacketProfile, datasetCaptureSeconds, datasetCaptureMiB, debugLog
+
+| Option                  | Default | Description                                                                             |
+|-------------------------|---------|-----------------------------------------------------------------------------------------|
+| `collectPacketProfile`  | `true`  | Records statistics by packet type and mod channel for detailed reports.                 |
+| `datasetCaptureSeconds` | `120`   | Default dataset capture duration, from 1 to 3600 seconds.                               |
+| `datasetCaptureMiB`     | `64`    | Maximum captured payload size per dataset, from 1 to 1024 MiB.                          |
+| `debugLog`              | `false` | Logs per-frame compression ratios at debug level; recommended only for troubleshooting. |
+
+## Credit
+
+Thanks to USS_Shenzhou and the contributors to the original [NotEnoughBandwidth](https://github.com/USS-Shenzhou/NotEnoughBandwidth) for the foundation and ideas behind this project's packet optimizations.
