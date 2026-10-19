@@ -34,6 +34,8 @@ public class BandwidthDictionary {
     private static final long MIN_DICTIONARY_TRAFFIC = 256L * 1024L;
     private static final long DICTIONARY_AMORTIZATION_FACTOR = 128L;
     private static final long RETRAIN_NANOS = TimeUnit.SECONDS.toNanos(60);
+    private static final int ENTROPY_SAMPLE_BYTES = 256;
+    private static final int HIGH_ENTROPY_UNIQUE_BYTES = 144;
     private static final ExecutorService TRAINER = new ThreadPoolExecutor(
         1,
         1,
@@ -95,13 +97,7 @@ public class BandwidthDictionary {
                 sampleBytes = 0;
             }
             sampleType = codecType;
-            int size = Math.min(packet.readableBytes(), MAX_SAMPLE_BYTES);
-            if (samples.size() < MAX_SAMPLES && size <= MAX_BUFFERED_BYTES - sampleBytes) {
-                byte[] sample = new byte[size];
-                packet.getBytes(packet.readerIndex(), sample);
-                samples.add(sample);
-                sampleBytes += size;
-            }
+            collectSamples(packet);
             if (samples.size() < MIN_SAMPLES || sampleBytes < MIN_SAMPLE_BYTES) {
                 // A corpus consisting entirely of tiny packets must not fill the sampler forever.
                 if (samples.size() == MAX_SAMPLES) {
@@ -195,6 +191,70 @@ public class BandwidthDictionary {
                 }
             }
         }
+    }
+
+    private void collectSamples(ByteBuf packet) {
+        NebVarInt.Cursor cursor = new NebVarInt.Cursor();
+        int index = packet.readerIndex();
+        int end = packet.writerIndex();
+        boolean foundPacket = false;
+        while (index < end && samples.size() < MAX_SAMPLES) {
+            cursor.at(index);
+            if (!NebVarInt.readAt(packet, cursor)) {
+                break;
+            }
+            int bodySize = cursor.value;
+            int bodyStart = cursor.index;
+            if (bodySize <= 0 || bodySize > end - bodyStart) {
+                break;
+            }
+            foundPacket = true;
+            if (looksCompressible(packet, bodyStart, bodySize)) {
+                int entrySize = bodyStart + bodySize - index;
+                int sampleSize = Math.min(entrySize, MAX_SAMPLE_BYTES);
+                if (sampleSize >= 32 && sampleSize <= MAX_BUFFERED_BYTES - sampleBytes) {
+                    byte[] sample = new byte[sampleSize];
+                    packet.getBytes(index, sample);
+                    samples.add(sample);
+                    sampleBytes += sampleSize;
+                }
+            }
+            index = bodyStart + bodySize;
+        }
+        if (!foundPacket && samples.size() < MAX_SAMPLES) {
+            int size = Math.min(packet.readableBytes(), MAX_SAMPLE_BYTES);
+            if (size >= 32 && size <= MAX_BUFFERED_BYTES - sampleBytes) {
+                byte[] sample = new byte[size];
+                packet.getBytes(packet.readerIndex(), sample);
+                samples.add(sample);
+                sampleBytes += size;
+            }
+        }
+    }
+
+    private static boolean looksCompressible(ByteBuf packet, int bodyStart, int bodySize) {
+        if (bodySize <= ENTROPY_SAMPLE_BYTES) {
+            return true;
+        }
+        int sampleSize = Math.min(bodySize, ENTROPY_SAMPLE_BYTES);
+        if (sampleSize <= 0) {
+            return false;
+        }
+        boolean[] seen = new boolean[256];
+        int unique = 0;
+        int stride = Math.max(1, bodySize / sampleSize);
+        int index = bodyStart;
+        for (int count = 0; count < sampleSize && index < bodyStart + bodySize; count++, index += stride) {
+            int value = packet.getUnsignedByte(index);
+            if (!seen[value]) {
+                seen[value] = true;
+                unique++;
+                if (unique >= HIGH_ENTROPY_UNIQUE_BYTES) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private static long score(List<byte[]> corpus, List<Integer> validationIndexes, byte[] dictionary,

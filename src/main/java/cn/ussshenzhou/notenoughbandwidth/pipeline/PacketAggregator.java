@@ -34,6 +34,7 @@ import io.netty.util.concurrent.ScheduledFuture;
 public class PacketAggregator extends ChannelDuplexHandler {
 
     private static final int INITIAL_CAPACITY = 8192;
+    private static final int MIN_STATEFUL_BATCH_BYTES = 16;
 
     private static final long COLD_STREAM_BYTES = 32L * 1024L;
 
@@ -43,6 +44,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
     private final CustomPayloadLookup payloadLookup = new CustomPayloadLookup();
     private final PacketBypassPolicy bypassPolicy = new PacketBypassPolicy(
         Arrays.asList(NebConfig.unaggregatedChannels),
+        Arrays.asList(NebConfig.unaggregatedPacketTypes),
         payloadLookup);
     private final List<ChannelPromise> pending = new ArrayList<>();
 
@@ -55,6 +57,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
     private boolean pendingContextReset;
     private long streamInputBytes;
     private boolean streamWarm;
+    private long accumulatorStartedNanos;
 
     public PacketAggregator(NebSession session) {
         this.session = session;
@@ -65,7 +68,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
         flushTask = () -> {
             flushScheduled = false;
             flushFuture = null;
-            if (!removed) {
+            if (!removed && !deferSmallStatefulBatch(ctx)) {
                 emit(ctx);
             }
         };
@@ -179,18 +182,44 @@ public class PacketAggregator extends ChannelDuplexHandler {
     }
 
     private void scheduleFlush(ChannelHandlerContext ctx) {
+        scheduleFlush(ctx, NebConfig.aggregationWindowMillis);
+    }
+
+    private void scheduleFlush(ChannelHandlerContext ctx, int delayMillis) {
         if (flushScheduled || flushTask == null) {
             return;
         }
         flushScheduled = true;
-        int window = NebConfig.aggregationWindowMillis;
-        if (window <= 0) {
+        if (delayMillis <= 0) {
             ctx.executor()
                 .execute(flushTask);
         } else {
             flushFuture = ctx.executor()
-                .schedule(flushTask, window, TimeUnit.MILLISECONDS);
+                .schedule(flushTask, delayMillis, TimeUnit.MILLISECONDS);
         }
+    }
+
+    private boolean deferSmallStatefulBatch(ChannelHandlerContext ctx) {
+        if (accumulator == null || !accumulator.isReadable()
+            || !session.outboundEnabled()
+            || !session.outboundType()
+                .stateful()
+            || accumulator.readableBytes() >= MIN_STATEFUL_BATCH_BYTES) {
+            return false;
+        }
+        int baseWindow = NebConfig.aggregationWindowMillis;
+        if (baseWindow <= 0 || accumulatorStartedNanos == 0L) {
+            return false;
+        }
+        long maxDelayMillis = NebConfig.smallPacketCoalescingMillis;
+        long elapsedNanos = System.nanoTime() - accumulatorStartedNanos;
+        long maxDelayNanos = TimeUnit.MILLISECONDS.toNanos(maxDelayMillis);
+        if (elapsedNanos >= maxDelayNanos) {
+            return false;
+        }
+        long remainingMillis = Math.max(1L, TimeUnit.NANOSECONDS.toMillis(maxDelayNanos - elapsedNanos));
+        scheduleFlush(ctx, (int) Math.min(baseWindow, remainingMillis));
+        return true;
     }
 
     private void cancelFlush() {
@@ -206,6 +235,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
             accumulator = ctx.alloc()
                 .directBuffer(INITIAL_CAPACITY);
             packetCount = 0;
+            accumulatorStartedNanos = System.nanoTime();
         }
         return accumulator;
     }
@@ -223,7 +253,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
         packetCount = 0;
 
         PacketCodecType type = session.outboundType();
-        if (type == PacketCodecType.STORED || rawSize < NebConfig.compressionThresholdBytes) {
+        if (type == PacketCodecType.STORED || (!type.stateful() && rawSize < NebConfig.compressionThresholdBytes)) {
             emitPlain(ctx, promises, rawSize, packets);
             return;
         }
@@ -300,6 +330,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
     private void emitPlain(ChannelHandlerContext ctx, List<ChannelPromise> promises, int rawSize, int packets) {
         ByteBuf raw = accumulator;
         accumulator = null;
+        accumulatorStartedNanos = 0L;
         try {
             int index = 0;
             while (raw.isReadable()) {
@@ -494,6 +525,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
             accumulator = null;
         }
         packetCount = 0;
+        accumulatorStartedNanos = 0L;
     }
 
     private void failPending(Throwable cause) {

@@ -1,7 +1,9 @@
 package cn.ussshenzhou.notenoughbandwidth.pipeline;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 import net.minecraft.network.Packet;
@@ -19,14 +21,27 @@ public class PacketBypassPolicy {
 
     private final Set<Integer> immediatePacketIds = new HashSet<>();
     private final Set<String> immediateChannels = new HashSet<>();
+    private final Set<String> immediatePacketTypes = new HashSet<>();
     private final CustomPayloadLookup payloadLookup;
     private BiMap<Integer, Class<? extends Packet>> resolvedProtocol;
 
     public PacketBypassPolicy(Collection<String> channels, CustomPayloadLookup payloadLookup) {
+        this(channels, Collections.emptySet(), payloadLookup);
+    }
+
+    public PacketBypassPolicy(Collection<String> channels, Collection<String> packetTypes,
+        CustomPayloadLookup payloadLookup) {
         if (channels != null) {
             for (String channel : channels) {
                 if (channel != null && !channel.isEmpty()) {
                     immediateChannels.add(channel);
+                }
+            }
+        }
+        if (packetTypes != null) {
+            for (String packetType : packetTypes) {
+                if (packetType != null && !packetType.isEmpty()) {
+                    immediatePacketTypes.add(packetType);
                 }
             }
         }
@@ -43,6 +58,12 @@ public class PacketBypassPolicy {
         addPacketId(protocol, S40PacketDisconnect.class);
         addPacketId(protocol, S07PacketRespawn.class);
         addPacketId(protocol, C00PacketKeepAlive.class);
+        for (Map.Entry<Integer, Class<? extends Packet>> entry : protocol.entrySet()) {
+            Class<? extends Packet> packetType = entry.getValue();
+            if (packetType != null && matchesConfiguredType(packetType)) {
+                immediatePacketIds.add(entry.getKey());
+            }
+        }
     }
 
     public boolean shouldBypass(ByteBuf body, int payloadId) {
@@ -64,5 +85,11 @@ public class PacketBypassPolicy {
         if (id != null) {
             immediatePacketIds.add(id);
         }
+    }
+
+    private boolean matchesConfiguredType(Class<? extends Packet> packetType) {
+        String fullName = packetType.getName();
+        String simpleName = packetType.getSimpleName();
+        return immediatePacketTypes.contains(fullName) || immediatePacketTypes.contains(simpleName);
     }
 }

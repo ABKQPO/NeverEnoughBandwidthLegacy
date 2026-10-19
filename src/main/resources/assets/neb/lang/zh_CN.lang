@@ -1,8 +1,10 @@
 neb.config.general.enabled=启用 NotEnoughBandwidth
 neb.config.general.codec=压缩后端
 neb.config.general.aggregationWindowMillis=聚合窗口（毫秒）
+neb.config.general.smallPacketCoalescingMillis=小包额外合并延迟（毫秒）
 neb.config.general.flushThresholdBytes=强制发送阈值（字节）
 neb.config.general.unaggregatedChannels=绕过聚合和压缩的 CustomPayload 通道
+neb.config.general.unaggregatedPacketTypes=保持原版路径的网络包类型
 neb.config.general.compressionThresholdBytes=压缩阈值（字节）
 neb.config.general.maxExpandedFrameBytes=解压后最大帧长（字节）
 neb.config.general.zstdLevel=zstd 压缩等级

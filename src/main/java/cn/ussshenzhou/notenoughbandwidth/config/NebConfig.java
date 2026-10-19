@@ -32,6 +32,12 @@ public class NebConfig {
     @Config.RangeInt(min = 0, max = 200)
     public static int aggregationWindowMillis = 20;
 
+    @Config.Comment({ "Additional delay for stateful codecs when a batch is too small to compress efficiently.",
+        "Set to 0 to keep the configured aggregation window as the hard latency limit." })
+    @Config.DefaultInt(80)
+    @Config.RangeInt(min = 0, max = 500)
+    public static int smallPacketCoalescingMillis = 80;
+
     @Config.Comment({ "Flush early once this many raw bytes are buffered. Bounds both latency and memory.",
         "Aggregation is also capped at 1 MiB to fit Minecraft 1.7.10's frame length limit.",
         "Individual packets above that cap are sent as ordinary Minecraft frames." })
@@ -46,7 +52,23 @@ public class NebConfig {
     @Config.RequiresMcRestart
     public static String[] unaggregatedChannels = { "FML|HS", "REGISTER", "UNREGISTER", "MC|Brand" };
 
-    @Config.Comment({ "Frames smaller than this are sent uncompressed; compressing them costs more than it saves." })
+    @Config.Comment({
+        "Packet classes that stay on the vanilla path because they are latency sensitive or frequently change.",
+        "Names may be fully qualified or simple class names. The list is evaluated against the active packet registry on each connection." })
+    @Config.DefaultStringList({ "S0CPacketSpawnPlayer", "S12PacketEntityVelocity", "S14PacketEntity",
+        "S14PacketEntity$S15PacketEntityRelMove", "S18PacketEntityTeleport", "S0EPacketSpawnObject",
+        "S13PacketDestroyEntities", "S23PacketBlockChange", "S02PacketChat", "S38PacketPlayerListItem",
+        "S07PacketRespawn", "S08PacketPlayerPosLook", "S06PacketUpdateHealth", "S1EPacketEntityDisplace",
+        "S44PacketWorldBorder" })
+    @Config.RequiresMcRestart
+    public static String[] unaggregatedPacketTypes = { "S0CPacketSpawnPlayer", "S12PacketEntityVelocity",
+        "S14PacketEntity", "S14PacketEntity$S15PacketEntityRelMove", "S18PacketEntityTeleport", "S0EPacketSpawnObject",
+        "S13PacketDestroyEntities", "S23PacketBlockChange", "S02PacketChat", "S38PacketPlayerListItem",
+        "S07PacketRespawn", "S08PacketPlayerPosLook", "S06PacketUpdateHealth", "S1EPacketEntityDisplace",
+        "S44PacketWorldBorder" };
+
+    @Config.Comment({
+        "Independent frames smaller than this are sent uncompressed; stateful streams may probe smaller batches after adaptive coalescing." })
     @Config.DefaultInt(64)
     @Config.RangeInt(min = 0, max = 65536)
     public static int compressionThresholdBytes = 64;
