@@ -1,5 +1,6 @@
 package cn.ussshenzhou.notenoughbandwidth.client;
 
+import java.util.Collections;
 import java.util.List;
 
 import net.minecraft.client.gui.GuiButton;
@@ -22,14 +23,23 @@ public class NebStatScreen extends GuiScreen {
     private static final int POLL = 1;
     private static final int DONE = 2;
     private static final long SERVER_POLL_MILLIS = 1000L;
+    private static final long REQUEST_TIMEOUT_MILLIS = 2500L;
+    private static final int MAX_UNANSWERED_REQUESTS = 3;
+    private static final long CHART_REFRESH_MILLIS = 250L;
     private static final int MARGIN = 10;
     private static final int CONTENT_TOP = 35;
     private static final int FOOTER_SPACE = 42;
     private TrafficSnapshot local = TrafficSnapshot.EMPTY;
     private TrafficSnapshot remote = TrafficSnapshot.EMPTY;
+    private List<TrafficPoint> clientPoints = Collections.emptyList();
+    private List<TrafficPoint> serverPoints = Collections.emptyList();
     private boolean requested;
     private boolean polling;
     private long nextPollAt;
+    private long pendingSince;
+    private long lastRemoteAt;
+    private long chartsRefreshedAt;
+    private int unanswered;
 
     @Override
     public void initGui() {
@@ -48,16 +58,32 @@ public class NebStatScreen extends GuiScreen {
 
     @Override
     public void updateScreen() {
-        NebSession session = mc.getNetHandler() == null ? null
-            : NebSessionRegistry.of(
-                mc.getNetHandler()
-                    .getNetworkManager());
+        NebSession session = session();
         local = session == null ? TrafficSnapshot.EMPTY : TrafficSnapshot.of(session.stats());
         remote = RemoteStats.snapshot();
-        if (polling && System.currentTimeMillis() >= nextPollAt) {
-            requestServer();
-            nextPollAt = System.currentTimeMillis() + SERVER_POLL_MILLIS;
+        long now = System.currentTimeMillis();
+        long remoteAt = RemoteStats.receivedAt();
+        if (remoteAt != lastRemoteAt) {
+            lastRemoteAt = remoteAt;
+            pendingSince = 0L;
+            unanswered = 0;
         }
+        if (polling && now >= nextPollAt) {
+            nextPollAt = now + SERVER_POLL_MILLIS;
+            if (pendingSince == 0L) {
+                requestServer();
+            } else if (now - pendingSince >= REQUEST_TIMEOUT_MILLIS) {
+                pendingSince = 0L;
+                unanswered++;
+                if (unanswered >= MAX_UNANSWERED_REQUESTS) {
+                    polling = false;
+                    refreshPollButton();
+                } else {
+                    requestServer();
+                }
+            }
+        }
+        refreshCharts(now);
         if (mc.theWorld == null) {
             mc.displayGuiScreen(null);
         }
@@ -67,20 +93,16 @@ public class NebStatScreen extends GuiScreen {
     protected void actionPerformed(GuiButton button) {
         if (button.id == DONE) {
             mc.displayGuiScreen(null);
-        } else if (button.id == QUERY && mc.getNetHandler() != null) {
-            NebSession session = NebSessionRegistry.of(
-                mc.getNetHandler()
-                    .getNetworkManager());
-            if (session != null && session.outboundEnabled()) {
-                NebNetwork.queryServer();
-                requested = true;
-            }
+        } else if (button.id == QUERY) {
+            requestServer();
         } else if (button.id == POLL) {
             polling = !polling;
+            pendingSince = 0L;
+            unanswered = 0;
             button.displayString = pollLabel();
             if (polling) {
-                requestServer();
                 nextPollAt = System.currentTimeMillis() + SERVER_POLL_MILLIS;
+                requestServer();
             }
         }
     }
@@ -129,7 +151,7 @@ public class NebStatScreen extends GuiScreen {
                     leftWidth,
                     serverCardHeight,
                     I18n.format("neb.stat.server"),
-                    I18n.format(requested ? "neb.stat.waiting" : "neb.stat.unavailable"));
+                    I18n.format(serverCardHint()));
             }
         }
 
@@ -137,8 +159,7 @@ public class NebStatScreen extends GuiScreen {
         int chartSpace = contentBottom - chartTop;
         int chartHeight = Math.max(60, (chartSpace - 8) / 2);
         if (chartWidth >= 180 && chartSpace >= 120) {
-            List<TrafficPoint> clientPoints = NebStats.timeline()
-                .snapshot();
+            refreshCharts(System.currentTimeMillis());
             NebChartRenderer.draw(
                 fontRendererObj,
                 chartX,
@@ -156,24 +177,23 @@ public class NebStatScreen extends GuiScreen {
                 chartWidth,
                 chartHeight,
                 I18n.format("neb.stat.chart.server"),
-                RemoteStats.timeline(),
+                serverPoints,
                 mouseX,
                 mouseY);
         }
         super.drawScreen(mouseX, mouseY, partialTicks);
     }
 
-    private void requestServer() {
-        if (mc.getNetHandler() == null) {
-            return;
+    private boolean requestServer() {
+        NebSession session = session();
+        if (session == null || !session.channel()
+            .isActive()) {
+            return false;
         }
-        NebSession session = NebSessionRegistry.of(
-            mc.getNetHandler()
-                .getNetworkManager());
-        if (session != null && session.outboundEnabled()) {
-            NebNetwork.queryServer();
-            requested = true;
-        }
+        NebNetwork.queryServer();
+        requested = true;
+        pendingSince = System.currentTimeMillis();
+        return true;
     }
 
     private NebSession session() {
@@ -181,6 +201,24 @@ public class NebStatScreen extends GuiScreen {
             : NebSessionRegistry.of(
                 mc.getNetHandler()
                     .getNetworkManager());
+    }
+
+    private void refreshCharts(long now) {
+        if (now - chartsRefreshedAt < CHART_REFRESH_MILLIS) {
+            return;
+        }
+        chartsRefreshedAt = now;
+        clientPoints = NebStats.timeline()
+            .snapshot();
+        serverPoints = RemoteStats.timeline();
+    }
+
+    private void refreshPollButton() {
+        for (Object element : buttonList) {
+            if (element instanceof GuiButton button && button.id == POLL) {
+                button.displayString = pollLabel();
+            }
+        }
     }
 
     private static String localCodec(NebSession session) {
@@ -215,9 +253,19 @@ public class NebStatScreen extends GuiScreen {
         return I18n.format(polling ? "neb.stat.poll.stop" : "neb.stat.poll.start");
     }
 
+    private String serverCardHint() {
+        if (unanswered >= MAX_UNANSWERED_REQUESTS) {
+            return "neb.stat.denied";
+        }
+        return requested ? "neb.stat.waiting" : "neb.stat.unavailable";
+    }
+
     private String headerStatus() {
         if (polling) {
             return "neb.stat.status.polling";
+        }
+        if (unanswered >= MAX_UNANSWERED_REQUESTS && !RemoteStats.present()) {
+            return "neb.stat.status.denied";
         }
         return RemoteStats.present() ? "neb.stat.status.connected" : "neb.stat.status.idle";
     }

@@ -1,6 +1,9 @@
 package cn.ussshenzhou.notenoughbandwidth.client;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.gui.Gui;
@@ -23,6 +26,7 @@ public class NebChartRenderer {
     private static final int WIRE_COLOR = 0xFF6EA8FF;
     private static final int RAW_FILL = 0x2266E0E8;
     private static final int WIRE_FILL = 0x226EA8FF;
+    private static final SimpleDateFormat TIME_FORMAT = new SimpleDateFormat("HH:mm:ss", Locale.ROOT);
 
     public static void draw(FontRenderer font, int x, int y, int width, int height, String title,
         List<TrafficPoint> points, int mouseX, int mouseY) {
@@ -34,10 +38,13 @@ public class NebChartRenderer {
         Gui.drawRect(x, y, x + 2, y + height, WIRE_COLOR);
         font.drawString(title, x + 10, y + 7, TITLE);
 
-        int plotLeft = x + 54;
+        long maximum = maximum(points);
+        long scale = Math.max(1L, maximum);
+        int axisLabelWidth = axisLabelWidth(font, scale);
+        int plotLeft = x + 10 + axisLabelWidth + 6;
         int plotTop = y + 28;
         int plotRight = x + width - 9;
-        int plotBottom = y + height - 15;
+        int plotBottom = y + height - 27;
         if (plotRight <= plotLeft || plotBottom <= plotTop) {
             return;
         }
@@ -45,15 +52,15 @@ public class NebChartRenderer {
         TrafficPoint latest = points.isEmpty() ? null : points.get(points.size() - 1);
         drawLegend(font, x + 10, y + 18, latest, plotRight - x - 10);
         if (points.size() < 2) {
+            drawTimeAxis(font, points, plotLeft, plotRight, plotBottom);
             font.drawString(I18n.format("neb.stat.chart.empty"), plotLeft, plotTop + 8, LABEL);
             return;
         }
 
-        long maximum = maximum(points);
-        long scale = Math.max(1L, maximum);
-        drawGrid(font, plotLeft, plotTop, plotRight, plotBottom, scale);
+        drawGrid(font, x + 8, plotLeft, plotTop, plotRight, plotBottom, scale);
         drawSeries(points, plotLeft, plotTop, plotRight - plotLeft, plotBottom - plotTop, scale, false);
         drawSeries(points, plotLeft, plotTop, plotRight - plotLeft, plotBottom - plotTop, scale, true);
+        drawTimeAxis(font, points, plotLeft, plotRight, plotBottom);
         drawCursorAndTooltip(font, points, plotLeft, plotTop, plotRight, plotBottom, mouseX, mouseY);
     }
 
@@ -67,14 +74,65 @@ public class NebChartRenderer {
         font.drawString(wire, wireX, y, WIRE_COLOR);
     }
 
-    private static void drawGrid(FontRenderer font, int left, int top, int right, int bottom, long maximum) {
+    private static void drawGrid(FontRenderer font, int labelLeft, int left, int top, int right, int bottom,
+        long maximum) {
         for (int tick = 0; tick <= 3; tick++) {
             int lineY = bottom - (bottom - top) * tick / 3;
             Gui.drawRect(left, lineY, right, lineY + 1, GRID);
-            long value = maximum * tick / 3;
+            long value = tickValue(maximum, tick);
             String label = ByteSize.formatRate(value);
-            font.drawString(label, Math.max(0, left - font.getStringWidth(label) - 5), lineY - 4, LABEL);
+            int labelX = Math.max(labelLeft, left - font.getStringWidth(label) - 5);
+            font.drawString(label, labelX, lineY - 4, LABEL);
         }
+    }
+
+    private static int axisLabelWidth(FontRenderer font, long maximum) {
+        int width = 0;
+        for (int tick = 0; tick <= 3; tick++) {
+            width = Math.max(width, font.getStringWidth(ByteSize.formatRate(tickValue(maximum, tick))));
+        }
+        return width;
+    }
+
+    private static void drawTimeAxis(FontRenderer font, List<TrafficPoint> points, int left, int right, int bottom) {
+        if (points.isEmpty()) {
+            return;
+        }
+        int last = points.size() - 1;
+        int middle = last / 2;
+        int[] indices = right - left < 160 ? new int[] { 0, last } : new int[] { 0, middle, last };
+        int previousRight = Integer.MIN_VALUE;
+        for (int index : indices) {
+            String label = formatTime(
+                points.get(index)
+                    .timestampMillis());
+            int labelWidth = font.getStringWidth(label);
+            int center = left + index * (right - left) / Math.max(1, last);
+            int labelX = Math.max(left, Math.min(right - labelWidth, center - labelWidth / 2));
+            if (labelX < previousRight + 4) {
+                continue;
+            }
+            font.drawString(label, labelX, bottom + 5, LABEL);
+            previousRight = labelX + labelWidth;
+        }
+    }
+
+    private static String formatTime(long timestampMillis) {
+        synchronized (TIME_FORMAT) {
+            return TIME_FORMAT.format(new Date(timestampMillis));
+        }
+    }
+
+    private static long tickValue(long maximum, int tick) {
+        if (tick == 0) {
+            return 0L;
+        }
+        if (tick == 3) {
+            return maximum;
+        }
+        long quotient = maximum / 3L;
+        long remainder = maximum % 3L;
+        return quotient * tick + remainder * tick / 3L;
     }
 
     private static void drawSeries(List<TrafficPoint> points, int x, int y, int width, int height, long maximum,

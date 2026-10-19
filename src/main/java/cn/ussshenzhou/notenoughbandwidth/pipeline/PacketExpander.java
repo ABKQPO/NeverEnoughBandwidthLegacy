@@ -1,7 +1,9 @@
 package cn.ussshenzhou.notenoughbandwidth.pipeline;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 
 import net.minecraft.network.NetworkManager;
@@ -28,14 +30,14 @@ import io.netty.handler.codec.MessageToMessageDecoder;
 
 public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
 
-    private static final int MAX_PENDING_FRAMES = 4;
+    private static final int MAX_PENDING_FRAMES = 128;
     private static final long MAX_PENDING_BYTES = 4L * NebFrame.MAX_WIRE_BYTES;
 
     private final NebSession session;
     private final PacketKindResolver resolver = new PacketKindResolver();
     private final ChannelIndex channelIndex = new ChannelIndex();
     private final CustomPayloadLookup payloadLookup = new CustomPayloadLookup();
-    private final List<ByteBuf> pendingFrames = new ArrayList<>();
+    private final Deque<ByteBuf> pendingFrames = new ArrayDeque<>();
     private Runnable negotiationListener;
     private long pendingBytes;
 
@@ -114,7 +116,7 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
         if (pendingFrames.size() >= MAX_PENDING_FRAMES || MAX_PENDING_BYTES - pendingBytes < size) {
             throw new CorruptedFrameException("NEB: too many frames arrived before negotiation");
         }
-        pendingFrames.add(frame.retain());
+        pendingFrames.addLast(frame.retain());
         pendingBytes += size;
     }
 
@@ -124,7 +126,7 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
         }
         List<Object> expanded = new ArrayList<>();
         while (!pendingFrames.isEmpty()) {
-            ByteBuf frame = pendingFrames.remove(0);
+            ByteBuf frame = pendingFrames.pollFirst();
             pendingBytes -= frame.readableBytes();
             try {
                 process(ctx, frame, expanded);
@@ -165,6 +167,9 @@ public class PacketExpander extends MessageToMessageDecoder<ByteBuf> {
         PacketCodecType codecType = NebFrame.codecOf(header);
         if (codecType == null) {
             throw new CorruptedFrameException("NEB: frame header 0x" + Integer.toHexString(header) + " is unknown");
+        }
+        if (NebFrame.resetsContext(header)) {
+            session.resetInboundCodec(codecType);
         }
         ByteBuf raw = expand(ctx, codecType, frame);
         List<Object> expanded = new ArrayList<>();

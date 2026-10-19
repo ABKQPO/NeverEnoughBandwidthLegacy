@@ -20,9 +20,6 @@ import io.netty.handler.codec.DecoderException;
 
 public class NebSession {
 
-    private static final long MIN_DICTIONARY_TRAFFIC = 256L * 1024L;
-    private static final long DICTIONARY_AMORTIZATION_FACTOR = 64L;
-
     private final Channel channel;
     private final TrafficStats stats = new TrafficStats();
     private final Map<PacketCodecType, PacketCodec> inboundCodecs = new EnumMap<>(PacketCodecType.class);
@@ -36,7 +33,7 @@ public class NebSession {
     private PacketCodec outboundCodec;
     private volatile boolean server;
     private volatile boolean dictionaryCapable;
-    private boolean released;
+    private volatile boolean released;
     private boolean clientHelloSent;
     private boolean serverSelectionSent;
     private PacketCodecType serverSelection = PacketCodecType.STORED;
@@ -116,7 +113,8 @@ public class NebSession {
 
     public void configurePeer(boolean server, int capabilityMask) {
         this.server = server;
-        this.dictionaryCapable = (capabilityMask & ModConstants.DICTIONARY_CAPABILITY) != 0;
+        this.dictionaryCapable = NebConfig.enableBandwidthDictionary
+            && (capabilityMask & ModConstants.DICTIONARY_CAPABILITY) != 0;
     }
 
     public boolean markClientHelloSent() {
@@ -148,7 +146,10 @@ public class NebSession {
         if (server && dictionaryCapable && NebConfig.enableBandwidthDictionary && isZstd(outboundType)) {
             dictionaryTraffic = Math.min(Long.MAX_VALUE - payload.readableBytes(), dictionaryTraffic)
                 + payload.readableBytes();
-            dictionaryTrainer.observe(payload);
+            if (dictionaryTrainer.snapshot() != outboundDictionary) {
+                return;
+            }
+            dictionaryTrainer.observe(payload, outboundType);
         }
     }
 
@@ -159,16 +160,21 @@ public class NebSession {
         Snapshot latest = dictionaryTrainer.snapshot();
         if (latest.size() == 0 || latest == outboundDictionary
             || latest.version() == outboundDictionary.version()
-            || (latest.size() != 0 && dictionaryTraffic
-                < Math.max(MIN_DICTIONARY_TRAFFIC, latest.size() * DICTIONARY_AMORTIZATION_FACTOR))) {
+            || dictionaryTraffic < BandwidthDictionary.minimumTrafficFor(latest.size())) {
             return null;
         }
         return latest;
     }
 
     public void installOutboundDictionary(Snapshot dictionary) {
+        if (released || !server || !dictionaryCapable || !outboundEnabled || !isZstd(outboundType)) {
+            throw new IllegalStateException("NEB: outbound dictionary is not allowed in the current session");
+        }
         if (dictionary == null || dictionary.size() == 0) {
             throw new IllegalArgumentException("NEB: outbound dictionary must not be empty");
+        }
+        if (dictionary.version() <= outboundDictionary.version()) {
+            throw new IllegalArgumentException("NEB: outbound dictionary version must increase");
         }
         closeOutboundCodec();
         outboundDictionary = dictionary;
@@ -181,7 +187,11 @@ public class NebSession {
     }
 
     public void installInboundDictionary(Snapshot dictionary) {
-        if (!dictionaryCapable || server || dictionary == null) {
+        if (!NebConfig.enableBandwidthDictionary || !dictionaryCapable
+            || server
+            || !outboundEnabled
+            || !isZstd(outboundType)
+            || dictionary == null) {
             throw new DecoderException("NEB: unsolicited dictionary control frame");
         }
         if (dictionary.version() <= inboundDictionary.version()) {
@@ -205,11 +215,23 @@ public class NebSession {
      * itself happens on the event loop, strictly between two frames.
      */
     public void enableOutbound(PacketCodecType type, int peerProtocol) {
-        this.peerProtocolVersion = peerProtocol;
-        if (outboundEnabled && outboundType == type) {
+        if (type == null) {
+            throw new IllegalArgumentException("NEB: outbound codec must not be null");
+        }
+        if (released || !channel.isActive()) {
             return;
         }
-        negotiated = true;
+        this.peerProtocolVersion = peerProtocol;
+        if (outboundEnabled) {
+            if (outboundType != type) {
+                NebLog.warn(
+                    "Ignoring a late codec switch for {} from {} to keep the compression stream aligned.",
+                    peerLabel,
+                    outboundType.configName(),
+                    type.configName());
+            }
+            return;
+        }
         Runnable activation = () -> activateOutbound(type);
         if (channel.eventLoop()
             .inEventLoop()) {
@@ -248,6 +270,16 @@ public class NebSession {
         return codec;
     }
 
+    public void resetOutboundCodec() {
+        closeOutboundCodec();
+    }
+
+    public void resetInboundCodec(PacketCodecType type) {
+        if (type != null) {
+            closeQuietly(inboundCodecs.remove(type));
+        }
+    }
+
     public void release() {
         released = true;
         dictionaryTrainer.reset();
@@ -280,6 +312,7 @@ public class NebSession {
         closeOutboundCodec();
         outboundType = type;
         outboundEnabled = true;
+        negotiated = true;
         NebLog.info(
             "Compression enabled for {} using {} ({})",
             peerLabel,

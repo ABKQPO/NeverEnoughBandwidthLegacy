@@ -28,9 +28,6 @@ public abstract class MixinPlayerInstance implements ChunkWatch {
     @Final
     private List<EntityPlayerMP> playersWatchingChunk;
 
-    @Shadow(remap = false)
-    private boolean loaded;
-
     @Shadow
     public abstract void removePlayer(EntityPlayerMP player);
 
@@ -71,7 +68,7 @@ public abstract class MixinPlayerInstance implements ChunkWatch {
 
     @Override
     public boolean neb$isSent(EntityPlayerMP player) {
-        return loaded && playersWatchingChunk.contains(player) && player.loadedChunks.contains(chunkLocation);
+        return playersWatchingChunk.contains(player) && player.loadedChunks.contains(chunkLocation);
     }
 
     @Override

@@ -94,7 +94,8 @@ public class PacketCodecRegistry {
                 mask |= 1 << type.wireId();
             }
         }
-        if (isAvailable(PacketCodecType.ZSTD_STREAM) || isAvailable(PacketCodecType.ZSTD_BLOCK)) {
+        if (NebConfig.enableBandwidthDictionary
+            && (isAvailable(PacketCodecType.ZSTD_STREAM) || isAvailable(PacketCodecType.ZSTD_BLOCK))) {
             mask |= ModConstants.DICTIONARY_CAPABILITY;
         }
         return mask;

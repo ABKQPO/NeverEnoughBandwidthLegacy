@@ -37,6 +37,7 @@ public class HelloMessage implements IMessage {
 
     @Override
     public void fromBytes(ByteBuf buf) {
+        selectedCodecWireId = -1;
         protocolVersion = ByteBufUtils.readVarInt(buf, 3);
         capabilityMask = ByteBufUtils.readVarInt(buf, 3);
         label = ByteBufUtils.readUTF8String(buf);

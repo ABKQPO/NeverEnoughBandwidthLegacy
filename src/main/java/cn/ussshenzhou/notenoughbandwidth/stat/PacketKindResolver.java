@@ -22,12 +22,19 @@ public class PacketKindResolver {
     private final Map<Integer, String> namesById = new HashMap<>();
     private final Map<Integer, Boolean> customPayloadById = new HashMap<>();
     private final Map<String, String> labelsByChannel = new HashMap<>();
+    private BiMap<Integer, Class<? extends Packet>> resolvedProtocol;
 
     /**
      * @param protocol the id to packet class map of the direction this body travels in
      * @param body     a complete encoded packet body, reader index at the varint packet id
      */
     public String resolve(BiMap<Integer, Class<? extends Packet>> protocol, ByteBuf body) {
+        if (protocol != resolvedProtocol) {
+            namesById.clear();
+            customPayloadById.clear();
+            labelsByChannel.clear();
+            resolvedProtocol = protocol;
+        }
         cursor.at(body.readerIndex());
         if (!NebVarInt.readAt(body, cursor)) {
             return UNKNOWN;

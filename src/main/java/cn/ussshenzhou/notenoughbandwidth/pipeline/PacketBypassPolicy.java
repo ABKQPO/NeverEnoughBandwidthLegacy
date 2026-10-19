@@ -20,6 +20,7 @@ public class PacketBypassPolicy {
     private final Set<Integer> immediatePacketIds = new HashSet<>();
     private final Set<String> immediateChannels = new HashSet<>();
     private final CustomPayloadLookup payloadLookup;
+    private BiMap<Integer, Class<? extends Packet>> resolvedProtocol;
 
     public PacketBypassPolicy(Collection<String> channels, CustomPayloadLookup payloadLookup) {
         if (channels != null) {
@@ -33,9 +34,10 @@ public class PacketBypassPolicy {
     }
 
     public void refresh(BiMap<Integer, Class<? extends Packet>> protocol) {
-        if (protocol == null) {
+        if (protocol == null || protocol == resolvedProtocol) {
             return;
         }
+        resolvedProtocol = protocol;
         immediatePacketIds.clear();
         addPacketId(protocol, S00PacketKeepAlive.class);
         addPacketId(protocol, S40PacketDisconnect.class);

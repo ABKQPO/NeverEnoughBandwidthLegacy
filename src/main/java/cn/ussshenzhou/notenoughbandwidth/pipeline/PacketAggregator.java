@@ -29,10 +29,13 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
+import io.netty.util.concurrent.ScheduledFuture;
 
 public class PacketAggregator extends ChannelDuplexHandler {
 
     private static final int INITIAL_CAPACITY = 8192;
+
+    private static final long COLD_STREAM_BYTES = 32L * 1024L;
 
     private final NebSession session;
     private final PacketKindResolver resolver = new PacketKindResolver();
@@ -46,8 +49,12 @@ public class PacketAggregator extends ChannelDuplexHandler {
     private ByteBuf accumulator;
     private int packetCount;
     private boolean flushScheduled;
+    private ScheduledFuture<?> flushFuture;
     private Runnable flushTask;
     private boolean removed;
+    private boolean pendingContextReset;
+    private long streamInputBytes;
+    private boolean streamWarm;
 
     public PacketAggregator(NebSession session) {
         this.session = session;
@@ -57,6 +64,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
     public void handlerAdded(ChannelHandlerContext ctx) {
         flushTask = () -> {
             flushScheduled = false;
+            flushFuture = null;
             if (!removed) {
                 emit(ctx);
             }
@@ -155,6 +163,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) {
         removed = true;
+        cancelFlush();
         flushTask = null;
         releaseAccumulator();
         failPending(new ClosedChannelException());
@@ -163,6 +172,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         removed = true;
+        cancelFlush();
         releaseAccumulator();
         failPending(new ClosedChannelException());
         super.channelInactive(ctx);
@@ -178,9 +188,17 @@ public class PacketAggregator extends ChannelDuplexHandler {
             ctx.executor()
                 .execute(flushTask);
         } else {
-            ctx.executor()
+            flushFuture = ctx.executor()
                 .schedule(flushTask, window, TimeUnit.MILLISECONDS);
         }
+    }
+
+    private void cancelFlush() {
+        if (flushFuture != null) {
+            flushFuture.cancel(false);
+            flushFuture = null;
+        }
+        flushScheduled = false;
     }
 
     private ByteBuf accumulator(ChannelHandlerContext ctx) {
@@ -193,6 +211,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
     }
 
     private void emit(ChannelHandlerContext ctx) {
+        cancelFlush();
         if (accumulator == null || !accumulator.isReadable()) {
             ctx.flush();
             return;
@@ -211,22 +230,32 @@ public class PacketAggregator extends ChannelDuplexHandler {
 
         ByteBuf frame;
         ByteBuf indexed = null;
+        ByteBuf dictionaryUpdate = null;
+        boolean dictionaryUpdateTransferred = false;
         int indexMark = channelIndex.mark();
         try {
             indexed = indexChannels(ctx, accumulator);
             ByteBuf compressionPayload = indexed == null ? accumulator : indexed;
-            session.observeOutbound(compressionPayload);
             Snapshot dictionary = session.nextOutboundDictionary();
             if (dictionary != null) {
-                ByteBuf update = DictionaryFrame.encode(ctx.alloc(), dictionary);
-                int wireSize = update.readableBytes() + NebVarInt.sizeOf(update.readableBytes());
+                dictionaryUpdate = DictionaryFrame.encode(ctx.alloc(), dictionary);
+                int wireSize = dictionaryUpdate.readableBytes() + NebVarInt.sizeOf(dictionaryUpdate.readableBytes());
                 session.installOutboundDictionary(dictionary);
+                streamWarm = false;
+                streamInputBytes = 0L;
                 record(0, wireSize, 0);
-                ctx.write(update)
-                    .addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
+                ChannelFuture dictionaryFuture = ctx.write(dictionaryUpdate);
+                dictionaryUpdateTransferred = true;
+                dictionaryFuture.addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
             }
             frame = compressedFrame(ctx, type, compressionPayload);
+            if (frame != null) {
+                session.observeOutbound(compressionPayload);
+            }
         } catch (Throwable t) {
+            if (!dictionaryUpdateTransferred) {
+                release(dictionaryUpdate);
+            }
             channelIndex.rollback(indexMark);
             release(indexed);
             releaseAccumulator();
@@ -325,7 +354,6 @@ public class PacketAggregator extends ChannelDuplexHandler {
     }
 
     private ByteBuf compressedFrame(ChannelHandlerContext ctx, PacketCodecType type, ByteBuf payload) {
-        ByteBuf frame;
         int rawSize = payload.readableBytes();
         PacketCodec codec = session.outboundCodec();
         int bound = codec.compressBound(rawSize);
@@ -333,10 +361,12 @@ public class PacketAggregator extends ChannelDuplexHandler {
         if (bound < 0 || bound > NebFrame.MAX_WIRE_BYTES - headerSize) {
             throw new IllegalStateException("NEB: codec bound exceeds Minecraft's frame length limit");
         }
-        frame = ctx.alloc()
+        boolean resetContext = pendingContextReset;
+        ByteBuf frame = ctx.alloc()
             .directBuffer(headerSize + bound);
+        boolean expands;
         try {
-            frame.writeByte(NebFrame.header(type));
+            frame.writeByte(NebFrame.header(type, resetContext));
             NebVarInt.write(frame, rawSize);
             ByteBuffer source = payload.nioBuffer();
             ByteBuffer destination = frame.nioBuffer(frame.writerIndex(), bound);
@@ -346,15 +376,32 @@ public class PacketAggregator extends ChannelDuplexHandler {
             int before = destination.position();
             codec.compress(source, destination);
             frame.writerIndex(frame.writerIndex() + (destination.position() - before));
-            if (!type.stateful() && frame.readableBytes() + NebVarInt.sizeOf(frame.readableBytes()) >= rawSize) {
-                frame.release();
-                return null;
-            }
+            int frameSize = frame.readableBytes();
+            expands = frameSize + NebVarInt.sizeOf(frameSize) >= rawSize;
         } catch (Throwable t) {
             frame.release();
             throw t;
         }
-        return frame;
+        if (!expands || (type.stateful() && streamWarm)) {
+            pendingContextReset = false;
+            streamInputBytes = Math.min(Long.MAX_VALUE - rawSize, streamInputBytes) + rawSize;
+            if (streamInputBytes >= COLD_STREAM_BYTES) {
+                streamWarm = true;
+            }
+            return frame;
+        }
+        frame.release();
+        // The compressed stream already consumed this batch, so the decoder history of the peer can
+        // no longer match ours. Dropping our context and announcing the reset on the next frame is
+        // only worth it while the history is still cheap; a warm stream is more valuable than the
+        // few bytes an incompressible frame overshoots by.
+        if (type.stateful()) {
+            session.resetOutboundCodec();
+            pendingContextReset = true;
+            streamWarm = false;
+            streamInputBytes = 0L;
+        }
+        return null;
     }
 
     /**
