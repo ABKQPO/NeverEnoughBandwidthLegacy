@@ -238,18 +238,28 @@ public class NebStatScreen extends GuiScreen {
         if (session == null || !session.outboundEnabled()) {
             return I18n.format("neb.stat.unnegotiated");
         }
-        String dictionary = session.outboundDictionaryVersion() == 0 ? ""
-            : " | dictionary v" + session.outboundDictionaryVersion()
-                + " ("
-                + session.outboundDictionarySize()
-                + " bytes)";
+        StringBuilder dictionaries = new StringBuilder();
+        appendDictionary(dictionaries, "out", session.outboundDictionaryVersion(), session.outboundDictionarySize());
+        appendDictionary(dictionaries, "in", session.inboundDictionaryVersion(), session.inboundDictionarySize());
         return session.outboundType()
             .configName() + " | "
             + PacketCodecRegistry.describe(session.outboundType())
             + " | aggregation "
             + NebConfig.aggregationWindowMillis
             + " ms"
-            + dictionary;
+            + dictionaries;
+    }
+
+    private static void appendDictionary(StringBuilder target, String direction, int version, int size) {
+        if (version != 0) {
+            target.append(" | dictionary ")
+                .append(direction)
+                .append(" v")
+                .append(version)
+                .append(" (")
+                .append(size)
+                .append(" bytes)");
+        }
     }
 
     private String pollLabel() {

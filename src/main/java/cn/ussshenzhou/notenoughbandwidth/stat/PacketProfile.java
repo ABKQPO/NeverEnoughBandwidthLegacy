@@ -12,6 +12,9 @@ public class PacketProfile {
     private final Map<String, Entry> entries = new ConcurrentHashMap<>();
 
     public void record(String label, int rawBytes) {
+        if (label == null || label.isEmpty() || rawBytes < 0) {
+            return;
+        }
         Entry entry = entries.get(label);
         if (entry == null) {
             Entry created = new Entry();
@@ -20,8 +23,8 @@ public class PacketProfile {
                 entry = created;
             }
         }
-        entry.count.incrementAndGet();
-        entry.rawBytes.addAndGet(rawBytes);
+        addSaturated(entry.count, 1L);
+        addSaturated(entry.rawBytes, rawBytes);
     }
 
     public void reset() {
@@ -35,7 +38,8 @@ public class PacketProfile {
     public long totalRawBytes() {
         long total = 0;
         for (Entry entry : entries.values()) {
-            total += entry.rawBytes.get();
+            long value = entry.rawBytes.get();
+            total = Long.MAX_VALUE - total < value ? Long.MAX_VALUE : total + value;
         }
         return total;
     }
@@ -59,5 +63,15 @@ public class PacketProfile {
 
         private final AtomicLong count = new AtomicLong();
         private final AtomicLong rawBytes = new AtomicLong();
+    }
+
+    private static void addSaturated(AtomicLong target, long amount) {
+        while (true) {
+            long current = target.get();
+            long updated = Long.MAX_VALUE - current < amount ? Long.MAX_VALUE : current + amount;
+            if (target.compareAndSet(current, updated)) {
+                return;
+            }
+        }
     }
 }

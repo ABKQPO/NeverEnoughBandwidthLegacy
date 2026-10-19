@@ -1,5 +1,25 @@
+import org.gradle.api.tasks.compile.JavaCompile
+
 plugins {
     id("com.gtnewhorizons.gtnhconvention")
+}
+
+val compressionProbeClasses = layout.buildDirectory.dir("tmp/compression-probe/classes")
+val compileCompressionProbe = tasks.register<JavaCompile>("compileCompressionProbe") {
+    dependsOn(tasks.named("classes"))
+    source = fileTree("tools") {
+        include("CompressionProbe.java")
+    }
+    classpath = sourceSets.main.get().runtimeClasspath
+    destinationDirectory.set(compressionProbeClasses)
+    options.encoding = "UTF-8"
+}
+
+tasks.register<JavaExec>("compressionProbe") {
+    dependsOn(compileCompressionProbe)
+    classpath = files(compressionProbeClasses, sourceSets.main.get().runtimeClasspath)
+    mainClass.set("CompressionProbe")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
 minecraft {

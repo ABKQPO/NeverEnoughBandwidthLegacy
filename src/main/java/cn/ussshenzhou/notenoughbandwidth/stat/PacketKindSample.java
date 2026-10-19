@@ -12,6 +12,9 @@ public class PacketKindSample {
      * @param rawBytes their combined pre-compression size, including NEB's per-packet length prefix
      */
     public PacketKindSample(String label, long count, long rawBytes) {
+        if (label == null || label.isEmpty() || count < 0 || rawBytes < 0) {
+            throw new IllegalArgumentException("Invalid packet profile sample");
+        }
         this.label = label;
         this.count = count;
         this.rawBytes = rawBytes;

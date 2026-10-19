@@ -34,6 +34,7 @@ public class BandwidthDictionary {
     private static volatile Snapshot current = EMPTY;
     private static List<byte[]> samples = new ArrayList<>();
     private static int sampleBytes;
+    private static int versionCounter;
     private static long generation;
     private static volatile long lastTraining;
     private static volatile boolean training;
@@ -113,8 +114,9 @@ public class BandwidthDictionary {
             synchronized (LOCK) {
                 if (generation == taskGeneration && NebConfig.enableBandwidthDictionary
                     && current == baseline
-                    && baseline.version < Integer.MAX_VALUE) {
-                    current = new Snapshot(baseline.version + 1, dictionary);
+                    && versionCounter < Integer.MAX_VALUE) {
+                    versionCounter = Math.max(versionCounter, baseline.version) + 1;
+                    current = new Snapshot(versionCounter, dictionary);
                     NebLog.debug(
                         "Published bandwidth dictionary {} ({} bytes, validation {} -> {}).",
                         current.version,

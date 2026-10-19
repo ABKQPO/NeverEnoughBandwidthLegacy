@@ -10,6 +10,7 @@ import io.netty.handler.codec.CorruptedFrameException;
 public class DictionaryFrame {
 
     public static final int HEADER = 0x90;
+    private static final int MIN_DICTIONARY_BYTES = 512;
 
     public static boolean matches(ByteBuf frame) {
         if (!frame.isReadable() || frame.getUnsignedByte(frame.readerIndex()) != HEADER) {
@@ -22,6 +23,7 @@ public class DictionaryFrame {
             int size = NebVarInt.read(view);
             return version >= 0 && size >= 0
                 && size <= BandwidthDictionary.MAX_DICTIONARY_BYTES
+                && (size == 0 || size >= MIN_DICTIONARY_BYTES)
                 && size == view.readableBytes()
                 && (version == 0) == (size == 0);
         } catch (IndexOutOfBoundsException | CorruptedFrameException ignored) {
@@ -49,6 +51,7 @@ public class DictionaryFrame {
         int size = NebVarInt.read(frame);
         if (version < 0 || size < 0
             || size > BandwidthDictionary.MAX_DICTIONARY_BYTES
+            || (size != 0 && size < MIN_DICTIONARY_BYTES)
             || size != frame.readableBytes()
             || (version == 0) != (size == 0)) {
             throw new CorruptedFrameException("NEB: invalid dictionary control frame");

@@ -133,7 +133,9 @@ public class DatasetAnalyzer {
                     continue;
                 }
                 if (type == PacketCodecType.STORED) {
-                    wireBytes = safeAdd(wireBytes, storedWireBytes(record));
+                    // The stored row is the uncompressed vanilla baseline. It must not include
+                    // NEB's optional channel index, otherwise the reported saving is overstated.
+                    wireBytes = safeAdd(wireBytes, record.rawBytes());
                     continue;
                 }
                 byte[] payload = record.copyPayload();
@@ -147,39 +149,6 @@ public class DatasetAnalyzer {
                 codec.close();
             }
         }
-    }
-
-    private static long storedWireBytes(DatasetRecord record) {
-        byte[] payload = record.copyPayload();
-        int offset = 0;
-        long total = 0;
-        for (int packet = 0; packet < record.packetCount(); packet++) {
-            int[] result = readVarInt(payload, offset);
-            int size = result[0];
-            offset = result[1];
-            if (size <= 0 || size > payload.length - offset) {
-                return record.wireBytes();
-            }
-            long entry = (long) size + NebVarInt.sizeOf(size);
-            total = safeAdd(total, entry);
-            offset += size;
-        }
-        return offset == payload.length ? total : record.wireBytes();
-    }
-
-    private static int[] readVarInt(byte[] payload, int offset) {
-        int value = 0;
-        int shift = 0;
-        int index = offset;
-        while (index < payload.length && shift < 35) {
-            int current = payload[index++] & 0xff;
-            value |= (current & 0x7f) << shift;
-            if ((current & 0x80) == 0) {
-                return new int[] { value, index };
-            }
-            shift += 7;
-        }
-        return new int[] { -1, payload.length };
     }
 
     private static int compress(PacketCodec codec, byte[] payload) {

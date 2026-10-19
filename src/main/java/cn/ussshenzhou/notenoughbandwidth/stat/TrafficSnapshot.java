@@ -141,11 +141,11 @@ public class TrafficSnapshot {
     }
 
     public long totalRawBytes() {
-        return outboundRawBytes + inboundRawBytes;
+        return safeAdd(outboundRawBytes, inboundRawBytes);
     }
 
     public long totalWireBytes() {
-        return outboundWireBytes + inboundWireBytes;
+        return safeAdd(outboundWireBytes, inboundWireBytes);
     }
 
     /**

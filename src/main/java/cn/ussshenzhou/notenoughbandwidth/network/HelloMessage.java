@@ -119,7 +119,6 @@ public class HelloMessage implements IMessage {
                         .markServerSelection(PacketCodecRegistry.negotiate(message.capabilityMask(), allowStateful))) {
                         agreed = session.serverSelection();
                         NebNetwork.sendHello(manager, "server", agreed);
-                        session.enableOutbound(agreed, message.protocolVersion());
                         return null;
                     }
                     NebLog.warn("The client sent an unexpected NEB codec confirmation; staying uncompressed.");

@@ -48,15 +48,17 @@ public class ReportHtmlWriter {
             out,
             "Outgoing bytes by packet kind",
             "Pre-compression size of everything this side sent, heaviest kind first.",
-            snapshot.outbound());
+            snapshot.outbound(),
+            traffic.outboundRawBytes());
         writeChart(
             out,
             "Incoming bytes by packet kind",
             "Pre-compression size of everything this side received, heaviest kind first.",
-            snapshot.inbound());
+            snapshot.inbound(),
+            traffic.inboundRawBytes());
         writeSessionTable(out, snapshot);
-        writePacketTable(out, "Outgoing packet kinds", snapshot.outbound());
-        writePacketTable(out, "Incoming packet kinds", snapshot.inbound());
+        writePacketTable(out, "Outgoing packet kinds", snapshot.outbound(), traffic.outboundRawBytes());
+        writePacketTable(out, "Incoming packet kinds", snapshot.inbound(), traffic.inboundRawBytes());
         writeMethod(out, snapshot);
 
         out.write("</div>\n");
@@ -185,7 +187,7 @@ public class ReportHtmlWriter {
             ByteSize.formatRate(traffic.inboundWireRate()) + " in, across "
                 + snapshot.sessions()
                     .size()
-                + " connection(s)");
+                + " active connection(s); totals include closed connections");
         out.write("</div>\n");
     }
 
@@ -199,9 +201,13 @@ public class ReportHtmlWriter {
                 + "</div></div>\n");
     }
 
-    private static void writeChart(Writer out, String title, String subtitle, List<PacketKindSample> samples)
-        throws IOException {
+    private static void writeChart(Writer out, String title, String subtitle, List<PacketKindSample> samples,
+        long trafficRawBytes) throws IOException {
         out.write("<div class=\"card\">\n<h2>" + escape(title) + "</h2>\n<p class=\"note\">" + escape(subtitle));
+        long profileRawBytes = profileRawBytes(samples);
+        out.write(
+            " Packet profile coverage: " + fmtPercent(profileRawBytes, trafficRawBytes)
+                + "; unclassified traffic is omitted from this chart.");
         if (samples.isEmpty()) {
             out.write(" No traffic recorded yet.</p>\n</div>\n");
             return;
@@ -374,12 +380,9 @@ public class ReportHtmlWriter {
         out.write("</tbody>\n</table>\n</div>\n");
     }
 
-    private static void writePacketTable(Writer out, String caption, List<PacketKindSample> samples)
-        throws IOException {
-        long total = 0;
-        for (PacketKindSample sample : samples) {
-            total += sample.rawBytes();
-        }
+    private static void writePacketTable(Writer out, String caption, List<PacketKindSample> samples,
+        long trafficRawBytes) throws IOException {
+        long total = trafficRawBytes;
         out.write("<div class=\"card\">\n<table>\n<caption>" + escape(caption) + "</caption>\n");
         out.write(
             "<thead><tr><th>Packet kind</th><th>Packets</th><th>Raw bytes</th><th>Share</th>"
@@ -409,6 +412,18 @@ public class ReportHtmlWriter {
                     + " further kinds omitted here; the CSV export has all of them.</p>\n");
         }
         out.write("</div>\n");
+    }
+
+    private static long profileRawBytes(List<PacketKindSample> samples) {
+        long total = 0L;
+        for (PacketKindSample sample : samples) {
+            total = Long.MAX_VALUE - total < sample.rawBytes() ? Long.MAX_VALUE : total + sample.rawBytes();
+        }
+        return total;
+    }
+
+    private static String fmtPercent(long part, long whole) {
+        return whole <= 0 ? "n/a" : fmt(100.0D * part / whole) + "%";
     }
 
     private static void writeMethod(Writer out, ReportSnapshot snapshot) throws IOException {

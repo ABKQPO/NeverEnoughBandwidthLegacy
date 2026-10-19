@@ -2,6 +2,7 @@ package cn.ussshenzhou.notenoughbandwidth.session;
 
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import cn.ussshenzhou.notenoughbandwidth.ModConstants;
 import cn.ussshenzhou.notenoughbandwidth.NebLog;
@@ -18,6 +19,9 @@ import io.netty.channel.Channel;
 import io.netty.handler.codec.DecoderException;
 
 public class NebSession {
+
+    private static final long MIN_DICTIONARY_TRAFFIC = 256L * 1024L;
+    private static final long DICTIONARY_AMORTIZATION_FACTOR = 64L;
 
     private final Channel channel;
     private final TrafficStats stats = new TrafficStats();
@@ -37,6 +41,7 @@ public class NebSession {
     private PacketCodecType serverSelection = PacketCodecType.STORED;
     private volatile Snapshot outboundDictionary = BandwidthDictionary.EMPTY;
     private volatile Snapshot inboundDictionary = BandwidthDictionary.EMPTY;
+    private final CopyOnWriteArrayList<Runnable> negotiationListeners = new CopyOnWriteArrayList<>();
     private long dictionaryTraffic;
 
     public NebSession(Channel channel) {
@@ -74,6 +79,20 @@ public class NebSession {
         return negotiated;
     }
 
+    public void whenNegotiated(Runnable listener) {
+        if (listener == null) {
+            return;
+        }
+        negotiationListeners.addIfAbsent(listener);
+        if (negotiated) {
+            notifyNegotiated(listener);
+        }
+    }
+
+    public void removeNegotiationListener(Runnable listener) {
+        negotiationListeners.remove(listener);
+    }
+
     public PacketCodecType outboundType() {
         return outboundType;
     }
@@ -84,6 +103,14 @@ public class NebSession {
 
     public int outboundDictionarySize() {
         return outboundDictionary.size();
+    }
+
+    public int inboundDictionaryVersion() {
+        return inboundDictionary.version();
+    }
+
+    public int inboundDictionarySize() {
+        return inboundDictionary.size();
     }
 
     public void configurePeer(boolean server, int capabilityMask) {
@@ -129,22 +156,35 @@ public class NebSession {
             return null;
         }
         Snapshot latest = BandwidthDictionary.snapshot();
-        if (latest == outboundDictionary || latest.version() == outboundDictionary.version()
-            || (latest.size() != 0 && dictionaryTraffic < Math.max(64 * 1024, latest.size() * 8))) {
+        if (latest.size() == 0 || latest == outboundDictionary
+            || latest.version() == outboundDictionary.version()
+            || (latest.size() != 0 && dictionaryTraffic
+                < Math.max(MIN_DICTIONARY_TRAFFIC, latest.size() * DICTIONARY_AMORTIZATION_FACTOR))) {
             return null;
         }
         return latest;
     }
 
     public void installOutboundDictionary(Snapshot dictionary) {
+        if (dictionary == null || dictionary.size() == 0) {
+            throw new IllegalArgumentException("NEB: outbound dictionary must not be empty");
+        }
         closeOutboundCodec();
         outboundDictionary = dictionary;
         dictionaryTraffic = 0;
+        NebLog.debug(
+            "Installed outbound bandwidth dictionary {} ({} bytes) for {}.",
+            dictionary.version(),
+            dictionary.size(),
+            peerLabel);
     }
 
     public void installInboundDictionary(Snapshot dictionary) {
-        if (!dictionaryCapable || server) {
+        if (!dictionaryCapable || server || dictionary == null) {
             throw new DecoderException("NEB: unsolicited dictionary control frame");
+        }
+        if (dictionary.version() <= inboundDictionary.version()) {
+            throw new DecoderException("NEB: stale dictionary version " + dictionary.version());
         }
         for (PacketCodecType type : PacketCodecType.values()) {
             if (isZstd(type)) {
@@ -152,6 +192,11 @@ public class NebSession {
             }
         }
         inboundDictionary = dictionary;
+        NebLog.debug(
+            "Installed inbound bandwidth dictionary {} ({} bytes) from {}.",
+            dictionary.version(),
+            dictionary.size(),
+            peerLabel);
     }
 
     /**
@@ -164,20 +209,14 @@ public class NebSession {
             return;
         }
         negotiated = true;
-        channel.eventLoop()
-            .execute(() -> {
-                if (released || !channel.isActive() || (outboundEnabled && outboundType == type)) {
-                    return;
-                }
-                closeOutboundCodec();
-                outboundType = type;
-                outboundEnabled = true;
-                NebLog.info(
-                    "Compression enabled for {} using {} ({})",
-                    peerLabel,
-                    type.configName(),
-                    PacketCodecRegistry.describe(type));
-            });
+        Runnable activation = () -> activateOutbound(type);
+        if (channel.eventLoop()
+            .inEventLoop()) {
+            activation.run();
+        } else {
+            channel.eventLoop()
+                .execute(activation);
+        }
     }
 
     public PacketCodec outboundCodec() {
@@ -193,9 +232,17 @@ public class NebSession {
     public PacketCodec inboundCodec(PacketCodecType type) {
         PacketCodec codec = inboundCodecs.get(type);
         if (codec == null) {
-            codec = PacketCodecRegistry.create(type);
-            loadDictionary(codec, inboundDictionary);
-            inboundCodecs.put(type, codec);
+            try {
+                codec = PacketCodecRegistry.create(type);
+                loadDictionary(codec, inboundDictionary);
+                inboundCodecs.put(type, codec);
+            } catch (Throwable failure) {
+                closeQuietly(codec);
+                if (failure instanceof DecoderException decoderFailure) {
+                    throw decoderFailure;
+                }
+                throw new DecoderException("NEB: invalid inbound codec state", failure);
+            }
         }
         return codec;
     }
@@ -209,6 +256,7 @@ public class NebSession {
         inboundCodecs.clear();
         outboundEnabled = false;
         negotiated = false;
+        negotiationListeners.clear();
         clientHelloSent = false;
         serverSelectionSent = false;
         serverSelection = PacketCodecType.STORED;
@@ -220,6 +268,23 @@ public class NebSession {
         if (outboundCodec != null) {
             closeQuietly(outboundCodec);
             outboundCodec = null;
+        }
+    }
+
+    private void activateOutbound(PacketCodecType type) {
+        if (released || !channel.isActive() || (outboundEnabled && outboundType == type)) {
+            return;
+        }
+        closeOutboundCodec();
+        outboundType = type;
+        outboundEnabled = true;
+        NebLog.info(
+            "Compression enabled for {} using {} ({})",
+            peerLabel,
+            type.configName(),
+            PacketCodecRegistry.describe(type));
+        for (Runnable listener : negotiationListeners) {
+            listener.run();
         }
     }
 
@@ -247,5 +312,14 @@ public class NebSession {
 
     private static boolean isZstd(PacketCodecType type) {
         return type == PacketCodecType.ZSTD_STREAM || type == PacketCodecType.ZSTD_BLOCK;
+    }
+
+    private void notifyNegotiated(Runnable listener) {
+        channel.eventLoop()
+            .execute(() -> {
+                if (!released && negotiated && negotiationListeners.contains(listener)) {
+                    listener.run();
+                }
+            });
     }
 }

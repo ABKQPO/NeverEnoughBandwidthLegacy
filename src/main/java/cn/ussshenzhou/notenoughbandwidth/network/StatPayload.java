@@ -1,5 +1,6 @@
 package cn.ussshenzhou.notenoughbandwidth.network;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -15,6 +16,7 @@ public class StatPayload {
 
     public static final int MAX_KINDS = 24;
     public static final int MAX_TIMELINE_POINTS = 60;
+    private static final int MAX_KIND_LABEL_BYTES = 256;
 
     public static void writeSnapshot(ByteBuf buf, TrafficSnapshot snapshot) {
         buf.writeLong(snapshot.outboundRawBytes());
@@ -46,7 +48,7 @@ public class StatPayload {
                 buf.readDouble(),
                 buf.readDouble(),
                 buf.readDouble());
-        } catch (IllegalArgumentException invalid) {
+        } catch (IndexOutOfBoundsException | IllegalArgumentException invalid) {
             throw new CorruptedFrameException("NEB: invalid traffic snapshot", invalid);
         }
     }
@@ -63,15 +65,19 @@ public class StatPayload {
     }
 
     public static List<PacketKindSample> readKinds(ByteBuf buf) {
-        int count = ByteBufUtils.readVarInt(buf, 2);
-        if (count < 0 || count > MAX_KINDS) {
-            throw new CorruptedFrameException("NEB: invalid packet profile length " + count);
+        try {
+            int count = ByteBufUtils.readVarInt(buf, 2);
+            if (count < 0 || count > MAX_KINDS) {
+                throw new CorruptedFrameException("NEB: invalid packet profile length " + count);
+            }
+            List<PacketKindSample> samples = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                samples.add(new PacketKindSample(readLabel(buf), buf.readLong(), buf.readLong()));
+            }
+            return samples;
+        } catch (IndexOutOfBoundsException | IllegalArgumentException invalid) {
+            throw new CorruptedFrameException("NEB: invalid packet profile", invalid);
         }
-        List<PacketKindSample> samples = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            samples.add(new PacketKindSample(ByteBufUtils.readUTF8String(buf), buf.readLong(), buf.readLong()));
-        }
-        return samples;
     }
 
     public static List<PacketKindSample> trim(List<PacketKindSample> samples) {
@@ -139,6 +145,16 @@ public class StatPayload {
             }
         }
         throw new CorruptedFrameException("NEB: oversized traffic timeline value");
+    }
+
+    private static String readLabel(ByteBuf buf) {
+        int length = ByteBufUtils.readVarInt(buf, 2);
+        if (length <= 0 || length > MAX_KIND_LABEL_BYTES || length > buf.readableBytes()) {
+            throw new CorruptedFrameException("NEB: invalid packet profile label length " + length);
+        }
+        byte[] bytes = new byte[length];
+        buf.readBytes(bytes);
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     private static long safeAdd(long left, long right) {

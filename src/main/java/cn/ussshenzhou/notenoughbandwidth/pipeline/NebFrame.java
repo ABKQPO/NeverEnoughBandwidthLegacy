@@ -26,6 +26,7 @@ public class NebFrame {
         if ((header & ~CODEC_MASK) != MARKER) {
             return null;
         }
-        return PacketCodecType.byWireId(header & CODEC_MASK);
+        PacketCodecType codec = PacketCodecType.byWireId(header & CODEC_MASK);
+        return codec == PacketCodecType.STORED ? null : codec;
     }
 }
