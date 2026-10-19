@@ -8,13 +8,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 
+import com.github.luben.zstd.Zstd;
+
+import cn.ussshenzhou.notenoughbandwidth.codec.DictionaryCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.DeflateStreamCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecType;
+import cn.ussshenzhou.notenoughbandwidth.codec.zstd.BandwidthDictionary;
 import cn.ussshenzhou.notenoughbandwidth.codec.zstd.ZstdBlockCodec;
 import cn.ussshenzhou.notenoughbandwidth.codec.zstd.ZstdStreamCodec;
 import cn.ussshenzhou.notenoughbandwidth.capture.DatasetAnalyzer;
@@ -27,33 +32,40 @@ public class CompressionProbe {
     private static final int[] ZSTD_LEVELS = { 3, 19 };
     private static final int MAX_DATASET_PAYLOAD_BYTES = 16 * 1024 * 1024;
     private static final int MAX_DATASET_RAW_BYTES = MAX_DATASET_PAYLOAD_BYTES * 2;
+    private static final int DICTIONARY_WINDOW_LOG = 22;
+    private static final long DICTIONARY_MIN_TRAFFIC = 256L * 1024L;
 
     public static void main(String[] args) {
         Options options = Options.parse(args);
-        StringBuilder output = new StringBuilder();
-        appendLine(
-            output,
-            "scenario,codec,iteration,frames,packets,stored_frames,stored_wire_bytes,input_bytes,packet_metadata_bytes,raw_bytes,raw_input_delta_bytes,codec_payload_bytes,compression_frame_header_bytes,raw_size_metadata_bytes,frame_length_bytes,stored_packet_length_bytes,wire_bytes,codec_ratio,wire_ratio,transport_metadata_percent,frame_flush_overhead_bytes,saved_percent");
-        if (options.dataset != null) {
-            if (options.analyzeDataset) {
-                Path csv = options.dataset.resolveSibling(
-                    options.dataset.getFileName().toString().replaceFirst("\\.[^.]+$", ".csv"));
-                try {
-                    DatasetAnalyzer.analyze(options.dataset, csv);
-                } catch (IOException failure) {
-                    throw new IllegalStateException("Could not analyze dataset " + options.dataset, failure);
-                }
-            }
-            runDataset(options.dataset, options, output);
+        String result;
+        if (options.trainDictionary) {
+            result = trainDictionary(options);
         } else {
-            for (int iteration = 0; iteration < options.iterations; iteration++) {
-                long seed = options.seed + iteration;
-                for (Scenario scenario : scenarios(options.frames, seed)) {
-                    runScenario(scenario, options, iteration + 1, output);
+            StringBuilder output = new StringBuilder();
+            appendLine(
+                output,
+                "scenario,codec,iteration,frames,packets,stored_frames,stored_wire_bytes,input_bytes,packet_metadata_bytes,raw_bytes,raw_input_delta_bytes,codec_payload_bytes,compression_frame_header_bytes,raw_size_metadata_bytes,frame_length_bytes,stored_packet_length_bytes,wire_bytes,codec_ratio,wire_ratio,transport_metadata_percent,frame_flush_overhead_bytes,saved_percent");
+            if (options.dataset != null) {
+                if (options.analyzeDataset) {
+                    Path csv = options.dataset.resolveSibling(
+                        options.dataset.getFileName().toString().replaceFirst("\\.[^.]+$", ".csv"));
+                    try {
+                        DatasetAnalyzer.analyze(options.dataset, csv);
+                    } catch (IOException failure) {
+                        throw new IllegalStateException("Could not analyze dataset " + options.dataset, failure);
+                    }
+                }
+                runDataset(options.dataset, options, output);
+            } else {
+                for (int iteration = 0; iteration < options.iterations; iteration++) {
+                    long seed = options.seed + iteration;
+                    for (Scenario scenario : scenarios(options.frames, seed)) {
+                        runScenario(scenario, options, iteration + 1, output);
+                    }
                 }
             }
+            result = output.toString();
         }
-        String result = output.toString();
         System.out.print(result);
         if (options.output != null) {
             try {
@@ -72,6 +84,126 @@ public class CompressionProbe {
                 throw new IllegalStateException("Could not write probe output " + options.output, failure);
             }
         }
+    }
+
+    private static String trainDictionary(Options options) {
+        if (options.dataset == null) {
+            throw new IllegalArgumentException("--train-dictionary requires --dataset=PATH");
+        }
+        if (options.dictionaryOut == null) {
+            throw new IllegalArgumentException("--train-dictionary requires --dictionary-out=PATH");
+        }
+        DatasetInput input;
+        try {
+            input = readDataset(options.dataset);
+        } catch (IOException failure) {
+            throw new IllegalStateException("Could not read dataset " + options.dataset, failure);
+        }
+        List<Frame> samples = input.frames.stream()
+            .filter(frame -> frame.outbound && !frame.stored && frame.codec == PacketCodecType.ZSTD_STREAM)
+            .toList();
+        if (samples.size() < 64) {
+            throw new IllegalArgumentException("Dataset has fewer than 64 outbound zstd_stream samples");
+        }
+        List<byte[]> training = new ArrayList<>();
+        List<byte[]> validation = new ArrayList<>();
+        for (int i = 0; i < samples.size(); i++) {
+            byte[] payload = samples.get(i).payload;
+            (i % 4 == 0 ? validation : training).add(
+                Arrays.copyOf(payload, Math.min(payload.length, BandwidthDictionary.MAX_SAMPLE_BYTES)));
+        }
+        byte[] destination = new byte[BandwidthDictionary.MAX_DICTIONARY_BYTES];
+        long dictionarySize = Zstd.trainFromBuffer(training.toArray(new byte[0][]), destination, false);
+        if (Zstd.isError(dictionarySize)
+            || dictionarySize < 512
+            || dictionarySize > BandwidthDictionary.MAX_DICTIONARY_BYTES) {
+            throw new IllegalStateException("Zstd dictionary training failed: " + Zstd.getErrorName(dictionarySize));
+        }
+        byte[] dictionary = Arrays.copyOf(destination, (int) dictionarySize);
+        int level = options.zstdLevels[0];
+        long baselineBytes = streamScore(validation, new byte[0], level);
+        long candidateBytes = streamScore(validation, dictionary, level);
+        long validationRaw = totalBytes(validation);
+        long expectedTraffic = Math.max(DICTIONARY_MIN_TRAFFIC, dictionary.length * 64L);
+        long projectedBaseline = scale(baselineBytes, expectedTraffic, validationRaw);
+        long projectedCandidate = scale(candidateBytes, expectedTraffic, validationRaw);
+        long dictionaryFrameBytes = estimateDictionaryWireBytes(dictionary.length, 1);
+        long netSaved = projectedBaseline - projectedCandidate - dictionaryFrameBytes;
+        boolean accepted = candidateBytes * 100 <= baselineBytes * 98 && netSaved > 0;
+        if (accepted) {
+            try {
+                Path parent = options.dictionaryOut.toAbsolutePath().getParent();
+                if (parent != null) {
+                    Files.createDirectories(parent);
+                }
+                Files.write(options.dictionaryOut, dictionary, StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            } catch (IOException failure) {
+                throw new IllegalStateException("Could not write dictionary " + options.dictionaryOut, failure);
+            }
+        }
+        StringBuilder output = new StringBuilder();
+        appendLine(output,
+            "dataset,codec,level,training_samples,validation_samples,validation_raw_bytes,dictionary_bytes,baseline_stream_bytes,candidate_stream_bytes,projected_baseline_bytes,projected_candidate_bytes,dictionary_frame_bytes,net_saved_bytes,accepted");
+        appendLine(output, String.format(Locale.ROOT,
+            "%s,zstd_stream,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s",
+            options.dataset,
+            level,
+            training.size(),
+            validation.size(),
+            validationRaw,
+            dictionary.length,
+            baselineBytes,
+            candidateBytes,
+            projectedBaseline,
+            projectedCandidate,
+            dictionaryFrameBytes,
+            netSaved,
+            accepted));
+        return output.toString();
+    }
+
+    private static long streamScore(List<byte[]> samples, byte[] dictionary, int level) {
+        try (ZstdStreamCodec codec = new ZstdStreamCodec(level, DICTIONARY_WINDOW_LOG)) {
+            if (dictionary.length != 0) {
+                ((DictionaryCodec) codec).loadDictionary(dictionary);
+            }
+            long result = 0;
+            for (byte[] sample : samples) {
+                ByteBuffer source = direct(sample);
+                ByteBuffer destination = ByteBuffer.allocateDirect(codec.compressBound(sample.length));
+                codec.compress(source, destination);
+                if (source.hasRemaining()) {
+                    throw new IllegalStateException("Dictionary probe compressor did not consume a sample");
+                }
+                result = safeAdd(result, destination.position());
+            }
+            return result;
+        }
+    }
+
+    private static long totalBytes(List<byte[]> samples) {
+        long result = 0;
+        for (byte[] sample : samples) {
+            result = safeAdd(result, sample.length);
+        }
+        return result;
+    }
+
+    private static long scale(long value, long targetBytes, long sourceBytes) {
+        if (value <= 0 || targetBytes <= 0 || sourceBytes <= 0) {
+            return 0;
+        }
+        return (value * targetBytes + sourceBytes - 1) / sourceBytes;
+    }
+
+    private static long estimateDictionaryWireBytes(int dictionaryBytes, int version) {
+        int bodyBytes = 1 + varIntSize(version) + varIntSize(dictionaryBytes) + dictionaryBytes;
+        return (long) bodyBytes + varIntSize(bodyBytes);
+    }
+
+    private static long safeAdd(long left, long right) {
+        return Long.MAX_VALUE - left < right ? Long.MAX_VALUE : left + right;
     }
 
     private static void runDataset(Path dataset, Options options, StringBuilder output) {
@@ -531,7 +663,7 @@ public class CompressionProbe {
         if (payload.length != joinedBytes) {
             throw new IllegalStateException("Dataset aggregate size is inconsistent");
         }
-        return new Frame(payload, packetCount, outbound, false, (int) recordedRawBytes, 0);
+        return new Frame(payload, packetCount, outbound, false, PacketCodecType.ZSTD_STREAM, (int) recordedRawBytes, 0);
     }
 
     private static Frame concatenateFrames(List<Frame> frames) {
@@ -557,7 +689,7 @@ public class CompressionProbe {
             System.arraycopy(frame.payload, 0, payload, offset, frame.payload.length);
             offset += frame.payload.length;
         }
-        return new Frame(payload, packetCount, true, false, (int) rawBytes, 0);
+        return new Frame(payload, packetCount, true, false, PacketCodecType.ZSTD_STREAM, (int) rawBytes, 0);
     }
 
     private static DatasetInput readDataset(Path dataset) throws IOException {
@@ -601,7 +733,7 @@ public class CompressionProbe {
                 byte[] payload = new byte[payloadLength];
                 input.readFully(payload);
                 frames.add(
-                    new Frame(payload, packetCount, direction != 0, codec == PacketCodecType.STORED, rawBytes,
+                    new Frame(payload, packetCount, direction != 0, codec == PacketCodecType.STORED, codec, rawBytes,
                         wireBytes));
             }
         }
@@ -762,19 +894,22 @@ public class CompressionProbe {
         private final int packetCount;
         private final boolean outbound;
         private final boolean stored;
+        private final PacketCodecType codec;
         private final int rawBytes;
         private final int recordedWireBytes;
 
         private Frame(byte[] payload, int packetCount) {
-            this(payload, packetCount, true, false, payload.length, 0);
+            this(payload, packetCount, true, false, PacketCodecType.ZSTD_STREAM, payload.length, 0);
         }
 
-        private Frame(byte[] payload, int packetCount, boolean outbound, boolean stored, int rawBytes,
+        private Frame(byte[] payload, int packetCount, boolean outbound, boolean stored, PacketCodecType codec,
+            int rawBytes,
             int recordedWireBytes) {
             this.payload = payload;
             this.packetCount = packetCount;
             this.outbound = outbound;
             this.stored = stored;
+            this.codec = codec;
             this.rawBytes = rawBytes;
             this.recordedWireBytes = recordedWireBytes;
         }
@@ -807,9 +942,11 @@ public class CompressionProbe {
         private final Path dataset;
         private final Path output;
         private final boolean analyzeDataset;
+        private final boolean trainDictionary;
+        private final Path dictionaryOut;
 
         private Options(int frames, int iterations, long seed, int[] zstdLevels, Path dataset, Path output,
-            boolean analyzeDataset) {
+            boolean analyzeDataset, boolean trainDictionary, Path dictionaryOut) {
             this.frames = frames;
             this.iterations = iterations;
             this.seed = seed;
@@ -817,6 +954,8 @@ public class CompressionProbe {
             this.dataset = dataset;
             this.output = output;
             this.analyzeDataset = analyzeDataset;
+            this.trainDictionary = trainDictionary;
+            this.dictionaryOut = dictionaryOut;
         }
 
         private static Options parse(String[] args) {
@@ -827,6 +966,8 @@ public class CompressionProbe {
             Path dataset = null;
             Path output = null;
             boolean analyzeDataset = false;
+            boolean trainDictionary = false;
+            Path dictionaryOut = null;
             for (int i = 0; i < args.length; i++) {
                 String argument = args[i];
                 if (argument.startsWith("--frames=")) {
@@ -850,17 +991,37 @@ public class CompressionProbe {
                     output = Path.of(argument.substring(9));
                 } else if (argument.equals("--analyze-dataset")) {
                     analyzeDataset = true;
+                } else if (argument.equals("--train-dictionary")) {
+                    trainDictionary = true;
+                } else if (argument.startsWith("--dictionary-out=")) {
+                    dictionaryOut = Path.of(argument.substring(17));
                 } else {
                     throw new IllegalArgumentException(
                         "Unknown argument " + argument
                             + "; use --frames=N --iterations=N --seed=N --zstd-levels=3,19"
-                            + " --dataset=PATH --output=PATH --analyze-dataset");
+                            + " --dataset=PATH --output=PATH --analyze-dataset"
+                            + " --train-dictionary --dictionary-out=PATH");
                 }
             }
             if (analyzeDataset && dataset == null) {
                 throw new IllegalArgumentException("--analyze-dataset requires --dataset=PATH");
             }
-            return new Options(frames, iterations, seed, levels, dataset, output, analyzeDataset);
+            if (trainDictionary && dataset == null) {
+                throw new IllegalArgumentException("--train-dictionary requires --dataset=PATH");
+            }
+            if (dictionaryOut != null && !trainDictionary) {
+                throw new IllegalArgumentException("--dictionary-out requires --train-dictionary");
+            }
+            return new Options(
+                frames,
+                iterations,
+                seed,
+                levels,
+                dataset,
+                output,
+                analyzeDataset,
+                trainDictionary,
+                dictionaryOut);
         }
 
         private static int positiveInt(String value, String name) {

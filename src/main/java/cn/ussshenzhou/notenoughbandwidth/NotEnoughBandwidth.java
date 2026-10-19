@@ -2,7 +2,6 @@ package cn.ussshenzhou.notenoughbandwidth;
 
 import cn.ussshenzhou.notenoughbandwidth.capture.DatasetRecorder;
 import cn.ussshenzhou.notenoughbandwidth.codec.PacketCodecRegistry;
-import cn.ussshenzhou.notenoughbandwidth.codec.zstd.BandwidthDictionary;
 import cn.ussshenzhou.notenoughbandwidth.config.NebConfig;
 import cn.ussshenzhou.notenoughbandwidth.network.NebNetwork;
 import cn.ussshenzhou.notenoughbandwidth.report.NebCommand;
@@ -18,7 +17,6 @@ import cpw.mods.fml.common.event.FMLServerStoppedEvent;
     name = Tags.MODNAME,
     version = Tags.VERSION,
     guiFactory = "cn.ussshenzhou.notenoughbandwidth.config.NebGuiFactory",
-    acceptableRemoteVersions = "*",
     acceptedMinecraftVersions = "[1.7.10]")
 public class NotEnoughBandwidth {
 
@@ -48,7 +46,6 @@ public class NotEnoughBandwidth {
 
     @Mod.EventHandler
     public void serverStarting(FMLServerStartingEvent event) {
-        BandwidthDictionary.reset();
         event.registerServerCommand(new NebCommand());
     }
 
@@ -56,6 +53,5 @@ public class NotEnoughBandwidth {
     public void serverStopped(FMLServerStoppedEvent event) {
         DatasetRecorder.global()
             .stop();
-        BandwidthDictionary.reset();
     }
 }

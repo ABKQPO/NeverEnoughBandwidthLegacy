@@ -26,6 +26,7 @@ public class NebSession {
     private final Channel channel;
     private final TrafficStats stats = new TrafficStats();
     private final Map<PacketCodecType, PacketCodec> inboundCodecs = new EnumMap<>(PacketCodecType.class);
+    private final BandwidthDictionary dictionaryTrainer = new BandwidthDictionary();
 
     private volatile boolean outboundEnabled;
     private volatile boolean negotiated;
@@ -143,11 +144,11 @@ public class NebSession {
         return serverSelection;
     }
 
-    public void observeOutbound(ByteBuf body) {
+    public void observeOutbound(ByteBuf payload) {
         if (server && dictionaryCapable && NebConfig.enableBandwidthDictionary && isZstd(outboundType)) {
-            dictionaryTraffic = Math.min(Long.MAX_VALUE - body.readableBytes(), dictionaryTraffic)
-                + body.readableBytes();
-            BandwidthDictionary.observe(body);
+            dictionaryTraffic = Math.min(Long.MAX_VALUE - payload.readableBytes(), dictionaryTraffic)
+                + payload.readableBytes();
+            dictionaryTrainer.observe(payload);
         }
     }
 
@@ -155,7 +156,7 @@ public class NebSession {
         if (!server || !dictionaryCapable || !isZstd(outboundType)) {
             return null;
         }
-        Snapshot latest = BandwidthDictionary.snapshot();
+        Snapshot latest = dictionaryTrainer.snapshot();
         if (latest.size() == 0 || latest == outboundDictionary
             || latest.version() == outboundDictionary.version()
             || (latest.size() != 0 && dictionaryTraffic
@@ -249,6 +250,7 @@ public class NebSession {
 
     public void release() {
         released = true;
+        dictionaryTrainer.reset();
         closeOutboundCodec();
         for (PacketCodec codec : inboundCodecs.values()) {
             closeQuietly(codec);

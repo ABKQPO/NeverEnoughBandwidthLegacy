@@ -93,7 +93,6 @@ public class PacketAggregator extends ChannelDuplexHandler {
             if (bypassPolicy.shouldBypass(body, payloadId)) {
                 emit(ctx);
                 profile(ctx, body);
-                session.observeOutbound(body);
                 int wireSize = body.readableBytes() + NebVarInt.sizeOf(body.readableBytes());
                 DatasetRecorder.global()
                     .record(true, PacketCodecType.STORED, wireSize, 1, wireSize, body);
@@ -103,7 +102,6 @@ public class PacketAggregator extends ChannelDuplexHandler {
                 return;
             }
             profile(ctx, body);
-            session.observeOutbound(body);
             int bodySize = body.readableBytes();
             int entrySize = bodySize + NebVarInt.sizeOf(bodySize);
             int limit = Math.min(NebFrame.MAX_AGGREGATED_BYTES, NebConfig.maxExpandedFrameBytes);
@@ -215,6 +213,9 @@ public class PacketAggregator extends ChannelDuplexHandler {
         ByteBuf indexed = null;
         int indexMark = channelIndex.mark();
         try {
+            indexed = indexChannels(ctx, accumulator);
+            ByteBuf compressionPayload = indexed == null ? accumulator : indexed;
+            session.observeOutbound(compressionPayload);
             Snapshot dictionary = session.nextOutboundDictionary();
             if (dictionary != null) {
                 ByteBuf update = DictionaryFrame.encode(ctx.alloc(), dictionary);
@@ -224,8 +225,7 @@ public class PacketAggregator extends ChannelDuplexHandler {
                 ctx.write(update)
                     .addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
             }
-            indexed = indexChannels(ctx, accumulator);
-            frame = compressedFrame(ctx, type, indexed == null ? accumulator : indexed);
+            frame = compressedFrame(ctx, type, compressionPayload);
         } catch (Throwable t) {
             channelIndex.rollback(indexMark);
             release(indexed);

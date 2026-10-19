@@ -68,8 +68,8 @@ public class NebConfig {
     @Config.RangeInt(min = 17, max = 27)
     public static int zstdWindowLog = 22;
 
-    @Config.Comment({ "Train bounded server dictionaries for peers advertising dictionary support.",
-        "Candidates must improve compression on held-out samples; legacy peers keep their existing format." })
+    @Config.Comment({ "Train bounded per-connection server dictionaries for peers advertising dictionary support.",
+        "Candidates must improve production-stream compression and repay their transfer cost; legacy peers keep their existing format." })
     @Config.DefaultBoolean(true)
     public static boolean enableBandwidthDictionary = true;
 
