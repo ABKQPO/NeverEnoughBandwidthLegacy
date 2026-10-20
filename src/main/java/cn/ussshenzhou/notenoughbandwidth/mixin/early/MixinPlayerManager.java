@@ -58,6 +58,10 @@ public abstract class MixinPlayerManager implements ChunkCacheController {
             return false;
         }
         ChunkCoordIntPair pos = watch.neb$position();
+        if (!getWorldServer().getChunkProvider()
+            .chunkExists(pos.chunkXPos, pos.chunkZPos)) {
+            return false;
+        }
         DelayedChunkCache<ChunkWatch> cache = neb$chunkCaches
             .computeIfAbsent(player, ignored -> new DelayedChunkCache<>());
         return cache.retain(
@@ -79,6 +83,13 @@ public abstract class MixinPlayerManager implements ChunkCacheController {
         ChunkCoordIntPair pos = watch.neb$position();
         if (neb$movingPlayer != player || cache == null || cache.restore(pos.chunkXPos, pos.chunkZPos) == null) {
             return false;
+        }
+        if (!getWorldServer().getChunkProvider()
+            .chunkExists(pos.chunkXPos, pos.chunkZPos)) {
+            return false;
+        }
+        if (!player.loadedChunks.contains(pos)) {
+            player.loadedChunks.add(pos);
         }
         getWorldServer().getEntityTracker()
             .func_85172_a(player, getWorldServer().getChunkFromChunkCoords(pos.chunkXPos, pos.chunkZPos));
